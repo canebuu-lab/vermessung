@@ -1,6 +1,7 @@
 let map;
-let segmentLayers = new Map(); // segmentId -> L.Polyline
+let segmentLayers = new Map(); // segmentId -> L.LayerGroup
 let liveLine = null;
+let liveVertexMarkers = [];
 let userMarker = null;
 let userAccuracyCircle = null;
 let hasCenteredOnUser = false;
@@ -59,16 +60,27 @@ function latLngsFromPoints(points) {
   return points.map((p) => [p.lat, p.lng]);
 }
 
-export function drawFinishedSegment(segment, color) {
+export function drawFinishedSegment(segment, color, onClick) {
   const existing = segmentLayers.get(segment.id);
   if (existing) map.removeLayer(existing);
   if (segment.points.length < 2) return;
-  const line = L.polyline(latLngsFromPoints(segment.points), {
-    color,
-    weight: 4,
-    opacity: 0.9,
-  }).addTo(map);
-  segmentLayers.set(segment.id, line);
+
+  const latlngs = latLngsFromPoints(segment.points);
+  const group = L.layerGroup().addTo(map);
+  // dokunma alanini genisletmek icin gorunmez kalin bir "hit" cizgisi
+  const hitLine = L.polyline(latlngs, { color, weight: 22, opacity: 0 }).addTo(group);
+  const visibleLine = L.polyline(latlngs, { color, weight: 4, opacity: 0.9 }).addTo(group);
+
+  if (onClick) {
+    const handler = (e) => {
+      L.DomEvent.stopPropagation(e);
+      onClick(segment.id);
+    };
+    hitLine.on("click", handler);
+    visibleLine.on("click", handler);
+  }
+
+  segmentLayers.set(segment.id, group);
 }
 
 export function removeSegment(segmentId) {
@@ -84,7 +96,7 @@ export function clearAllSegments() {
   segmentLayers.clear();
 }
 
-export function setLivePoints(points, color) {
+export function setLivePoints(points, color, onVertexClick) {
   const latlngs = latLngsFromPoints(points);
   if (!liveLine) {
     liveLine = L.polyline(latlngs, {
@@ -98,6 +110,24 @@ export function setLivePoints(points, color) {
     liveLine.setLatLngs(latlngs);
     liveLine.setStyle({ color });
   }
+
+  for (const m of liveVertexMarkers) map.removeLayer(m);
+  liveVertexMarkers = points.map((p, idx) => {
+    const marker = L.circleMarker([p.lat, p.lng], {
+      radius: 9,
+      color: "#fff",
+      weight: 2,
+      fillColor: color,
+      fillOpacity: 1,
+    }).addTo(map);
+    if (onVertexClick) {
+      marker.on("click", (e) => {
+        L.DomEvent.stopPropagation(e);
+        onVertexClick(idx);
+      });
+    }
+    return marker;
+  });
 }
 
 export function clearLive() {
@@ -105,6 +135,8 @@ export function clearLive() {
     map.removeLayer(liveLine);
     liveLine = null;
   }
+  for (const m of liveVertexMarkers) map.removeLayer(m);
+  liveVertexMarkers = [];
 }
 
 export function panTo(lat, lng) {

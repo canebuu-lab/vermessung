@@ -11,6 +11,8 @@ import {
   getCurrentSegment,
   clearAll,
   nextDefaultColor,
+  deleteSegment,
+  truncateSegmentPoints,
 } from "./state.js";
 import {
   initMap,
@@ -173,6 +175,18 @@ function renderLayers() {
   }
 }
 
+// ---- bitmis bir cizgiye tiklaninca komple sil ----
+function handleDeleteFinishedSegment(segmentId) {
+  const state = getState();
+  const seg = state.segments.find((s) => s.id === segmentId);
+  if (!seg) return;
+  const layer = state.layers.find((l) => l.id === seg.layerId);
+  const name = layer ? layer.name : "bilinmeyen katman";
+  if (confirm(`"${name}" katmanindaki bu cizgi tamamen silinsin mi? (${seg.points.length} nokta)`)) {
+    deleteSegment(segmentId);
+  }
+}
+
 // ---- bitmis segmentleri haritada ciz ----
 function renderSegmentsOnMap() {
   const state = getState();
@@ -183,7 +197,7 @@ function renderSegmentsOnMap() {
     if (seg.points.length < 2) continue;
     const layer = layersById.get(seg.layerId);
     if (!layer) continue;
-    drawFinishedSegment(seg, layer.color);
+    drawFinishedSegment(seg, layer.color, handleDeleteFinishedSegment);
   }
 }
 
@@ -356,6 +370,42 @@ layerPickerOverlay.addEventListener("click", (e) => {
   if (e.target === layerPickerOverlay) closeLayerPicker();
 });
 
+// ---- aktif cizginin toplam mesafesini noktalardan yeniden hesapla ----
+function recalcRecordDistance(points) {
+  let dist = 0;
+  for (let i = 1; i < points.length; i++) {
+    dist += haversineMeters(points[i - 1].lat, points[i - 1].lng, points[i].lat, points[i].lng);
+  }
+  return dist;
+}
+
+// ---- aktif cizginin bir noktasina tiklaninca o noktadan sonrasini sil ----
+function handleDeleteVertex(segmentId, idx) {
+  const seg = getCurrentSegment();
+  if (!seg || seg.id !== segmentId) return;
+
+  const removedCount = seg.points.length - idx;
+  if (removedCount > 1) {
+    if (!confirm(`Son ${removedCount} nokta silinecek. Emin misin?`)) return;
+  }
+
+  truncateSegmentPoints(segmentId, idx);
+  const updated = getCurrentSegment();
+
+  if (updated && updated.points.length > 0) {
+    recordDistance = recalcRecordDistance(updated.points);
+    setLivePoints(updated.points, getActiveLayer()?.color ?? "#ff5722", (i) =>
+      handleDeleteVertex(updated.id, i)
+    );
+  } else {
+    clearLive();
+    recordDistance = 0;
+  }
+
+  renderRecordInfo();
+  renderTopStatus();
+}
+
 // ---- + : aktif katmana nokta ekle (onceki nokta varsa duz cizgiyle baglar) ----
 btnRecord.addEventListener("click", () => {
   const active = getActiveLayer();
@@ -382,7 +432,7 @@ btnRecord.addEventListener("click", () => {
   }
 
   appendPoint(seg.id, point);
-  setLivePoints(seg.points, active.color);
+  setLivePoints(seg.points, active.color, (idx) => handleDeleteVertex(seg.id, idx));
   renderRecordInfo();
   renderTopStatus();
 });

@@ -111,6 +111,24 @@ export function getCurrentSegment() {
   return state.segments.find((s) => s.id === state.currentSegmentId) ?? null;
 }
 
+export function deleteSegment(segmentId) {
+  state.segments = state.segments.filter((s) => s.id !== segmentId);
+  if (state.currentSegmentId === segmentId) state.currentSegmentId = null;
+  emit();
+}
+
+// keepCount kadar nokta birakip gerisini atar (0 ise segmenti tamamen kaldirir)
+export function truncateSegmentPoints(segmentId, keepCount) {
+  const seg = state.segments.find((s) => s.id === segmentId);
+  if (!seg) return;
+  seg.points = seg.points.slice(0, keepCount);
+  if (seg.points.length === 0) {
+    state.segments = state.segments.filter((s) => s.id !== segmentId);
+    if (state.currentSegmentId === segmentId) state.currentSegmentId = null;
+  }
+  emit();
+}
+
 export function clearAll() {
   state.layers = [];
   state.segments = [];
