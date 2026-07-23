@@ -41,6 +41,9 @@ import { downloadDxf } from "./dxfExport.js";
 const SAMPLE_WINDOW_MS = 3000; // haritadaki konum noktasi icin son okuma penceresi
 const MARKER_SMOOTHING = 0.35; // haritadaki konum noktasi titremesini azaltmak icin (0-1)
 const CAPTURE_DURATION_MS = 6000; // nokta eklerken GPS ornegi toplama suresi (daha stabil nokta icin)
+const MAX_PLAUSIBLE_SPEED_MPS = 20; // ~72 km/h - bunun uzerindeki ani "sicramalar" GPS hatasi sayilir
+const OUTLIER_CONFIRM_STREAK = 2; // ust uste bu kadar tutarli sicrama gelirse gercek konum degisikligi kabul edilir
+const CAPTURE_OUTLIER_RADIUS_M = 12; // nokta yakalarken medyandan bu kadar uzak orneklerin agirligi dusurulur
 
 // ---- DOM ----
 const el = (id) => document.getElementById(id);
@@ -87,7 +90,7 @@ const btnRemovePointMarker = el("btnRemovePointMarker");
 const btnDeletePoint = el("btnDeletePoint");
 
 // ---- runtime (persist edilmeyen) durum ----
-let lastPosition = null; // en son ham GPS okumasi (marker/durum icin)
+let lastPosition = null; // en son KABUL EDILEN (sicrama filtresinden gecmis) GPS okumasi
 let recentSamples = []; // nokta eklerken ortalama almak icin son okumalar
 let smoothedMarkerPos = null; // haritadaki mavi nokta icin yumusatilmis konum
 let recordDistance = 0;
@@ -95,6 +98,9 @@ let watchId = null;
 let trackingEnabled = true;
 let capturing = false;
 let captureBuffer = [];
+let lastAcceptedPos = null; // sicrama filtresinin kiyasladigi son guvenilir konum
+let lastRejectedPos = null;
+let rejectedStreak = 0;
 
 function isLineInProgress() {
   return getCurrentSegment() != null;
@@ -303,14 +309,33 @@ function renderRecordInfo() {
   recordInfo.textContent = `${count} nokta · ${recordDistance.toFixed(1)} m`;
 }
 
+function median(nums) {
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 // ---- GPS orneklerinin dogruluga gore agirlikli ortalamasini al (daha stabil nokta icin) ----
+// Once medyan konumdan asiri sapan "sapitmis" ornekler elenir, sonra kalanlarin
+// dogruluguna gore agirlikli ortalamasi alinir.
 function weightedAveragePosition(samples) {
   if (samples.length === 0) return null;
+
+  let usable = samples;
+  if (samples.length >= 3) {
+    const medLat = median(samples.map((p) => p.lat));
+    const medLng = median(samples.map((p) => p.lng));
+    const filtered = samples.filter(
+      (p) => haversineMeters(p.lat, p.lng, medLat, medLng) <= CAPTURE_OUTLIER_RADIUS_M
+    );
+    if (filtered.length > 0) usable = filtered;
+  }
+
   let sumLat = 0;
   let sumLng = 0;
   let sumWeight = 0;
   let bestAccuracy = Infinity;
-  for (const p of samples) {
+  for (const p of usable) {
     const acc = p.accuracy && p.accuracy > 0 ? p.accuracy : 15;
     const weight = 1 / (acc * acc);
     sumLat += p.lat * weight;
@@ -321,14 +346,33 @@ function weightedAveragePosition(samples) {
   return {
     lat: sumLat / sumWeight,
     lng: sumLng / sumWeight,
-    alt: samples[samples.length - 1].alt,
+    alt: usable[usable.length - 1].alt,
     accuracy: bestAccuracy,
     t: Date.now(),
   };
 }
 
+// ---- ani ve fizik disi bir "sicrama" mi (GPS hatasi olasiligi yuksek) ----
+function isImplausibleJump(prevPos, nextPos) {
+  const dtSec = Math.max(((nextPos.t ?? Date.now()) - (prevPos.t ?? 0)) / 1000, 0.5);
+  const dist = haversineMeters(prevPos.lat, prevPos.lng, nextPos.lat, nextPos.lng);
+  return dist / dtSec > MAX_PLAUSIBLE_SPEED_MPS;
+}
+
 // ---- GPS izleme baslat/durdur (harita ustundeki konum + durum gostergesi icin) ----
 function onGpsPosition(pos) {
+  // ani, fizik disi bir sicrama mi? (ornegin GPS multipath/yansima hatasi)
+  // Tek seferlik sicramalari yok sayiyoruz; ama ust uste tutarli gelirse
+  // (gercekten oraya gidildiyse) OUTLIER_CONFIRM_STREAK sonrasi kabul ediyoruz.
+  if (lastAcceptedPos && isImplausibleJump(lastAcceptedPos, pos)) {
+    rejectedStreak = lastRejectedPos && !isImplausibleJump(lastRejectedPos, pos) ? rejectedStreak + 1 : 1;
+    lastRejectedPos = pos;
+    if (rejectedStreak < OUTLIER_CONFIRM_STREAK) return; // bu okumayi yok say
+  }
+  rejectedStreak = 0;
+  lastRejectedPos = null;
+  lastAcceptedPos = pos;
+
   setGpsStatus(pos.accuracy);
 
   const now = Date.now();
@@ -358,6 +402,11 @@ function onGpsError(err) {
 
 function enableTracking() {
   if (watchId != null) return;
+  // takip birakildigi yerden sonra konum degismis olabilir, sicrama filtresi
+  // eski konumla kiyaslamasin diye sifirlaniyor
+  lastAcceptedPos = null;
+  lastRejectedPos = null;
+  rejectedStreak = 0;
   watchId = startWatch(onGpsPosition, onGpsError);
   trackingEnabled = true;
   btnToggleTracking.classList.remove("off");
