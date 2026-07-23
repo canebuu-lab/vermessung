@@ -5,6 +5,7 @@ import {
   removeLayer,
   setActiveLayer,
   getActiveLayer,
+  getLayer,
   startSegment,
   appendPoint,
   finishSegment,
@@ -201,10 +202,7 @@ function renderLayers() {
     if (!isPoint) {
       item.addEventListener("click", () => {
         if (layer.id === state.activeLayerId) return;
-        if (isLineInProgress()) {
-          finishCurrentLine();
-        }
-        setActiveLayer(layer.id);
+        switchActiveLayerContinuing(layer.id);
       });
     }
 
@@ -395,6 +393,26 @@ function finishCurrentLine() {
   renderTopStatus();
 }
 
+// ---- aktif katmani degistir; devam eden bir cizgi varsa onu bitirip yeni katmanda
+// kaldigi son noktadan devam eder (bosluk birakmadan, ornegin toprak -> asfalt gecisi) ----
+function switchActiveLayerContinuing(newLayerId) {
+  const current = getCurrentSegment();
+  const lastPoint = current?.points[current.points.length - 1] ?? null;
+
+  if (isLineInProgress()) finishCurrentLine();
+  setActiveLayer(newLayerId);
+
+  if (lastPoint) {
+    const newLayer = getLayer(newLayerId);
+    const seg = startSegment(newLayerId);
+    appendPoint(seg.id, { lat: lastPoint.lat, lng: lastPoint.lng, alt: lastPoint.alt, accuracy: lastPoint.accuracy, t: Date.now() });
+    recordDistance = 0;
+    setLivePoints(seg.points, newLayer.color, (idx) => handleDeleteVertex(seg.id, idx));
+    renderRecordInfo();
+    renderTopStatus();
+  }
+}
+
 // ---- kisa bilgi baloncugu ----
 let toastTimer = null;
 function showToast(message) {
@@ -427,8 +445,7 @@ function openLayerPicker() {
     item.appendChild(name);
     item.addEventListener("click", () => {
       if (layer.id !== state.activeLayerId) {
-        if (isLineInProgress()) finishCurrentLine();
-        setActiveLayer(layer.id);
+        switchActiveLayerContinuing(layer.id);
       }
       closeLayerPicker();
     });
