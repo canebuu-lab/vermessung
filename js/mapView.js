@@ -7,10 +7,14 @@ let userAccuracyCircle = null;
 let hasCenteredOnUser = false;
 
 export function initMap() {
-  map = L.map("map", { zoomControl: true }).setView([51.1657, 10.4515], 6);
+  // maxZoom haritanin izin verdigi ust sinir, maxNativeZoom ise OSM'nin gercekten
+  // kaplama sagladigi seviye - ustune ciktiginda son karo buyutulerek gosterilir
+  // (bulanik ama bos degil), boylece nokta isaretlerken daha fazla yakinlasilabilir.
+  map = L.map("map", { zoomControl: true, maxZoom: 23 }).setView([51.1657, 10.4515], 6);
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 20,
+    maxZoom: 23,
+    maxNativeZoom: 19,
     attribution: "&copy; OpenStreetMap katkida bulunanlar",
   }).addTo(map);
 
