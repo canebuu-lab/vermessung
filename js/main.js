@@ -14,6 +14,9 @@ import {
   truncateSegmentPoints,
   removePointFromSegment,
   splitSegmentAtEdge,
+  setPointMarker,
+  removePointMarker,
+  getPointMarker,
 } from "./state.js";
 import {
   initMap,
@@ -52,6 +55,8 @@ const newLayerName = el("newLayerName");
 const newLayerColor = el("newLayerColor");
 const btnCancelLayer = el("btnCancelLayer");
 const btnSaveLayer = el("btnSaveLayer");
+const btnTypeLine = el("btnTypeLine");
+const btnTypePoint = el("btnTypePoint");
 
 const statSegments = el("statSegments");
 const statPoints = el("statPoints");
@@ -73,6 +78,11 @@ const toast = el("toast");
 const layerPickerOverlay = el("layerPickerOverlay");
 const layerPickerList = el("layerPickerList");
 const btnClosePicker = el("btnClosePicker");
+
+const pointLayerPickerOverlay = el("pointLayerPickerOverlay");
+const pointLayerPickerList = el("pointLayerPickerList");
+const btnClosePointPicker = el("btnClosePointPicker");
+const btnRemovePointMarker = el("btnRemovePointMarker");
 
 // ---- runtime (persist edilmeyen) durum ----
 let lastPosition = null; // en son ham GPS okumasi (marker/durum icin)
@@ -105,9 +115,20 @@ btnCloseSidebar.addEventListener("click", closeSidebar);
 sidebarOverlay.addEventListener("click", closeSidebar);
 
 // ---- katman ekleme formu ----
+let newLayerType = "line";
+
+function setNewLayerType(type) {
+  newLayerType = type;
+  btnTypeLine.classList.toggle("active", type === "line");
+  btnTypePoint.classList.toggle("active", type === "point");
+}
+btnTypeLine.addEventListener("click", () => setNewLayerType("line"));
+btnTypePoint.addEventListener("click", () => setNewLayerType("point"));
+
 btnAddLayer.addEventListener("click", () => {
   newLayerColor.value = nextDefaultColor();
   newLayerName.value = "";
+  setNewLayerType("line");
   addLayerForm.classList.remove("hidden");
   newLayerName.focus();
 });
@@ -120,7 +141,7 @@ btnSaveLayer.addEventListener("click", () => {
     newLayerName.focus();
     return;
   }
-  addLayer(name, newLayerColor.value);
+  addLayer(name, newLayerColor.value, newLayerType);
   addLayerForm.classList.add("hidden");
 });
 newLayerName.addEventListener("keydown", (e) => {
@@ -140,16 +161,21 @@ function renderLayers() {
   }
 
   for (const layer of state.layers) {
+    const isPoint = layer.type === "point";
     const item = document.createElement("div");
     item.className = "layer-item" + (layer.id === state.activeLayerId ? " active" : "");
 
     const swatch = document.createElement("div");
-    swatch.className = "layer-swatch";
+    swatch.className = "layer-swatch" + (isPoint ? " point-type" : "");
     swatch.style.background = layer.color;
 
     const name = document.createElement("div");
     name.className = "layer-name";
     name.textContent = layer.name;
+
+    const typeTag = document.createElement("span");
+    typeTag.className = "layer-type-tag";
+    typeTag.textContent = isPoint ? "nokta" : "çizgi";
 
     const del = document.createElement("button");
     del.className = "layer-del";
@@ -161,24 +187,29 @@ function renderLayers() {
         alert("Devam eden cizgi bu katmanda. Once 'Bitir' ile cizgiyi tamamla.");
         return;
       }
-      const count = state.segments.filter((s) => s.layerId === layer.id).length;
+      const count = isPoint
+        ? state.pointMarkers.filter((pm) => pm.layerId === layer.id).length
+        : state.segments.filter((s) => s.layerId === layer.id).length;
       const msg =
         count > 0
-          ? `"${layer.name}" katmaninda ${count} cizim var. Katman ve cizimler silinsin mi?`
+          ? `"${layer.name}" katmaninda ${count} ${isPoint ? "etiketli nokta" : "cizim"} var. Katman silinsin mi?`
           : `"${layer.name}" katmani silinsin mi?`;
       if (confirm(msg)) removeLayer(layer.id);
     });
 
-    item.addEventListener("click", () => {
-      if (layer.id === state.activeLayerId) return;
-      if (isLineInProgress()) {
-        finishCurrentLine();
-      }
-      setActiveLayer(layer.id);
-    });
+    if (!isPoint) {
+      item.addEventListener("click", () => {
+        if (layer.id === state.activeLayerId) return;
+        if (isLineInProgress()) {
+          finishCurrentLine();
+        }
+        setActiveLayer(layer.id);
+      });
+    }
 
     item.appendChild(swatch);
     item.appendChild(name);
+    item.appendChild(typeTag);
     item.appendChild(del);
     layerListEl.appendChild(item);
   }
@@ -198,17 +229,29 @@ function handleDeleteFinishedVertex(segmentId, idx) {
   }
 }
 
+let taggingPointId = null;
+
 // ---- bitmis segmentleri haritada ciz ----
 function renderSegmentsOnMap() {
   const state = getState();
   clearAllSegments();
   const layersById = new Map(state.layers.map((l) => [l.id, l]));
+  const pointMarkerColors = new Map();
+  for (const pm of state.pointMarkers) {
+    const layer = layersById.get(pm.layerId);
+    if (layer) pointMarkerColors.set(pm.pointId, layer.color);
+  }
   for (const seg of state.segments) {
     if (seg.id === state.currentSegmentId) continue; // aktif kayit live line ile cizilir
     if (seg.points.length < 2) continue;
     const layer = layersById.get(seg.layerId);
     if (!layer) continue;
-    drawFinishedSegment(seg, layer.color, handleDeleteFinishedEdge, handleDeleteFinishedVertex);
+    drawFinishedSegment(seg, layer.color, {
+      onEdgeClick: handleDeleteFinishedEdge,
+      onVertexClick: handleDeleteFinishedVertex,
+      onVertexTag: (segmentId, idx, pointId) => openPointLayerPicker(pointId),
+      pointMarkerColors,
+    });
   }
 }
 
@@ -234,7 +277,7 @@ function renderTopStatus() {
   btnRecord.classList.toggle("recording", lineActive);
   btnRecord.classList.toggle("capturing", capturing);
   btnFinishLine.disabled = !lineActive || capturing;
-  btnSwitchLayer.disabled = state.layers.length === 0 || capturing;
+  btnSwitchLayer.disabled = state.layers.filter((l) => l.type !== "point").length === 0 || capturing;
 }
 
 function renderAll() {
@@ -378,7 +421,7 @@ function showToast(message) {
 function openLayerPicker() {
   const state = getState();
   layerPickerList.innerHTML = "";
-  for (const layer of state.layers) {
+  for (const layer of state.layers.filter((l) => l.type !== "point")) {
     const item = document.createElement("div");
     item.className = "layer-picker-item" + (layer.id === state.activeLayerId ? " active" : "");
 
@@ -409,6 +452,57 @@ btnSwitchLayer.addEventListener("click", openLayerPicker);
 btnClosePicker.addEventListener("click", closeLayerPicker);
 layerPickerOverlay.addEventListener("click", (e) => {
   if (e.target === layerPickerOverlay) closeLayerPicker();
+});
+
+// ---- bir noktaya "nokta katmani" etiketi secme popup'i ----
+function openPointLayerPicker(pointId) {
+  const state = getState();
+  const pointLayers = state.layers.filter((l) => l.type === "point");
+  taggingPointId = pointId;
+
+  pointLayerPickerList.innerHTML = "";
+  if (pointLayers.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "Henuz nokta katmani yok. Once katman listesinden bir 'Nokta katmani' ekle.";
+    pointLayerPickerList.appendChild(empty);
+  }
+
+  const currentMarker = getPointMarker(pointId);
+  for (const layer of pointLayers) {
+    const item = document.createElement("div");
+    item.className = "layer-picker-item" + (currentMarker?.layerId === layer.id ? " active" : "");
+
+    const swatch = document.createElement("div");
+    swatch.className = "layer-swatch point-type";
+    swatch.style.background = layer.color;
+
+    const name = document.createElement("div");
+    name.textContent = layer.name;
+
+    item.appendChild(swatch);
+    item.appendChild(name);
+    item.addEventListener("click", () => {
+      setPointMarker(pointId, layer.id);
+      closePointLayerPicker();
+    });
+    pointLayerPickerList.appendChild(item);
+  }
+
+  btnRemovePointMarker.classList.toggle("hidden", !currentMarker);
+  pointLayerPickerOverlay.classList.remove("hidden");
+}
+function closePointLayerPicker() {
+  taggingPointId = null;
+  pointLayerPickerOverlay.classList.add("hidden");
+}
+btnClosePointPicker.addEventListener("click", closePointLayerPicker);
+btnRemovePointMarker.addEventListener("click", () => {
+  if (taggingPointId) removePointMarker(taggingPointId);
+  closePointLayerPicker();
+});
+pointLayerPickerOverlay.addEventListener("click", (e) => {
+  if (e.target === pointLayerPickerOverlay) closePointLayerPicker();
 });
 
 // ---- aktif cizginin toplam mesafesini noktalardan yeniden hesapla ----
@@ -518,7 +612,7 @@ btnExportDxf.addEventListener("click", () => {
     return;
   }
   const state = getState();
-  downloadDxf(state.layers, state.segments);
+  downloadDxf(state.layers, state.segments, state.pointMarkers);
 });
 
 // ---- hepsini sil ----

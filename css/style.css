@@ -109,7 +109,16 @@ body {
   flex-shrink: 0;
   border: 1px solid rgba(255,255,255,0.25);
 }
+.layer-swatch.point-type { border-radius: 50%; }
 .layer-name { flex: 1; font-size: 14px; }
+.layer-type-tag {
+  font-size: 10px;
+  color: #64748b;
+  border: 1px solid #2a3750;
+  border-radius: 999px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+}
 .layer-meta { font-size: 11px; color: #94a3b8; }
 .layer-del {
   background: transparent;
@@ -160,6 +169,23 @@ body {
   padding: 8px 10px;
   font-size: 14px;
 }
+.type-row { display: flex; gap: 6px; }
+.type-btn {
+  flex: 1;
+  background: #0f172a;
+  border: 1px solid #2a3750;
+  color: #94a3b8;
+  border-radius: 8px;
+  padding: 7px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.type-btn.active {
+  border-color: #38bdf8;
+  color: #e2e8f0;
+  background: #16283a;
+}
+
 .color-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #94a3b8; }
 .color-row input[type="color"] {
   width: 40px; height: 28px;

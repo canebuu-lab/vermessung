@@ -7,11 +7,16 @@ function uid() {
   return "id-" + Date.now() + "-" + Math.random().toString(16).slice(2);
 }
 
+function isPointLayer(layer) {
+  return layer?.type === "point";
+}
+
 const loaded = loadRawState();
 
 const state = {
   layers: loaded?.layers ?? [],
   segments: loaded?.segments ?? [],
+  pointMarkers: loaded?.pointMarkers ?? [], // { id, pointId, layerId } - bir cizgi noktasina eklenen "nokta katmani" etiketi
   activeLayerId: loaded?.activeLayerId ?? null,
   currentSegmentId: null, // recording in progress -> not persisted across reload
 };
@@ -19,14 +24,25 @@ const state = {
 const listeners = new Set();
 
 function emit() {
+  pruneOrphanPointMarkers();
   persist();
   for (const cb of listeners) cb(state);
+}
+
+function pruneOrphanPointMarkers() {
+  if (state.pointMarkers.length === 0) return;
+  const validPointIds = new Set();
+  for (const seg of state.segments) {
+    for (const p of seg.points) if (p.id) validPointIds.add(p.id);
+  }
+  state.pointMarkers = state.pointMarkers.filter((pm) => validPointIds.has(pm.pointId));
 }
 
 function persist() {
   saveRawState({
     layers: state.layers,
     segments: state.segments,
+    pointMarkers: state.pointMarkers,
     activeLayerId: state.activeLayerId,
   });
 }
@@ -46,10 +62,11 @@ export function nextDefaultColor() {
   return free ?? DEFAULT_COLORS[state.layers.length % DEFAULT_COLORS.length];
 }
 
-export function addLayer(name, color) {
-  const layer = { id: uid(), name: name.trim() || "Katman", color, createdAt: Date.now() };
+// type: "line" (varsayilan, cizgi katmani) veya "point" (nokta katmani - mevcut bir cizgi noktasina etiket olarak eklenir)
+export function addLayer(name, color, type = "line") {
+  const layer = { id: uid(), name: name.trim() || "Katman", color, type, createdAt: Date.now() };
   state.layers.push(layer);
-  if (!state.activeLayerId) state.activeLayerId = layer.id;
+  if (!state.activeLayerId && type !== "point") state.activeLayerId = layer.id;
   emit();
   return layer;
 }
@@ -61,8 +78,9 @@ export function removeLayer(id) {
   }
   state.layers = state.layers.filter((l) => l.id !== id);
   state.segments = state.segments.filter((s) => s.layerId !== id);
+  state.pointMarkers = state.pointMarkers.filter((pm) => pm.layerId !== id);
   if (state.activeLayerId === id) {
-    state.activeLayerId = state.layers[0]?.id ?? null;
+    state.activeLayerId = state.layers.find((l) => !isPointLayer(l))?.id ?? null;
   }
   emit();
   return true;
@@ -92,7 +110,7 @@ export function startSegment(layerId) {
 export function appendPoint(segmentId, point) {
   const seg = state.segments.find((s) => s.id === segmentId);
   if (!seg) return;
-  seg.points.push(point);
+  seg.points.push({ id: uid(), ...point });
   emit();
 }
 
@@ -153,9 +171,26 @@ export function splitSegmentAtEdge(segmentId, edgeIdx) {
   emit();
 }
 
+// bir cizgi noktasina "nokta katmani" etiketi ekler/degistirir (her noktada en fazla bir tane olur)
+export function setPointMarker(pointId, pointLayerId) {
+  state.pointMarkers = state.pointMarkers.filter((pm) => pm.pointId !== pointId);
+  state.pointMarkers.push({ id: uid(), pointId, layerId: pointLayerId, createdAt: Date.now() });
+  emit();
+}
+
+export function removePointMarker(pointId) {
+  state.pointMarkers = state.pointMarkers.filter((pm) => pm.pointId !== pointId);
+  emit();
+}
+
+export function getPointMarker(pointId) {
+  return state.pointMarkers.find((pm) => pm.pointId === pointId) ?? null;
+}
+
 export function clearAll() {
   state.layers = [];
   state.segments = [];
+  state.pointMarkers = [];
   state.activeLayerId = null;
   state.currentSegmentId = null;
   clearRawState();

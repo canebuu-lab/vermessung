@@ -37,6 +37,10 @@
 
     <div id="addLayerForm" class="add-layer-form hidden">
       <input id="newLayerName" type="text" placeholder="Katman adı (ör. Asfalt)" maxlength="40" />
+      <div class="type-row">
+        <button id="btnTypeLine" type="button" class="type-btn active" data-type="line">─ Çizgi katmanı</button>
+        <button id="btnTypePoint" type="button" class="type-btn" data-type="point">● Nokta katmanı</button>
+      </div>
       <div class="color-row">
         <input id="newLayerColor" type="color" value="#ff5722" />
         <span>Renk</span>
@@ -82,6 +86,16 @@
       <h3>Katman seç</h3>
       <div id="layerPickerList" class="layer-picker-list"></div>
       <button id="btnClosePicker" class="btn btn-ghost btn-block">Kapat</button>
+    </div>
+  </div>
+
+  <div id="pointLayerPickerOverlay" class="layer-picker-overlay hidden">
+    <div class="layer-picker-panel">
+      <h3>Nokta katmanı seç</h3>
+      <p class="hint">Bu nokta için bir etiket seç (ör. Hausübergabepunkt).</p>
+      <div id="pointLayerPickerList" class="layer-picker-list"></div>
+      <button id="btnRemovePointMarker" class="btn btn-danger-outline btn-block hidden">Etiketi Kaldır</button>
+      <button id="btnClosePointPicker" class="btn btn-ghost btn-block">Kapat</button>
     </div>
   </div>
 

@@ -32,7 +32,7 @@ function buildLayerTable(layers) {
   return out;
 }
 
-function buildEntities(segments, layersById) {
+function buildEntities(segments, layersById, pointMarkers) {
   let out = "";
   out += dxfPair(0, "SECTION");
   out += dxfPair(2, "ENTITIES");
@@ -58,11 +58,33 @@ function buildEntities(segments, layersById) {
     }
   }
 
+  if (pointMarkers && pointMarkers.length > 0) {
+    const pointsById = new Map();
+    for (const segment of segments) {
+      for (const p of segment.points) pointsById.set(p.id, p);
+    }
+
+    for (const pm of pointMarkers) {
+      const layer = layersById.get(pm.layerId);
+      const point = pointsById.get(pm.pointId);
+      if (!layer || !point) continue;
+      const trueColor = hexToTrueColorInt(layer.color);
+      const { x, y } = wgs84ToTarget(point.lat, point.lng);
+
+      out += dxfPair(0, "CIRCLE");
+      out += dxfPair(8, sanitizeLayerName(layer.name));
+      out += dxfPair(420, trueColor);
+      out += dxfPair(10, x.toFixed(3));
+      out += dxfPair(20, y.toFixed(3));
+      out += dxfPair(40, "0.15");
+    }
+  }
+
   out += dxfPair(0, "ENDSEC");
   return out;
 }
 
-export function buildDxfString(layers, segments) {
+export function buildDxfString(layers, segments, pointMarkers = []) {
   const layersById = new Map(layers.map((l) => [l.id, l]));
 
   let out = "";
@@ -91,20 +113,20 @@ export function buildDxfString(layers, segments) {
   out += buildLayerTable(layers);
   out += dxfPair(0, "ENDSEC");
 
-  out += buildEntities(segments, layersById);
+  out += buildEntities(segments, layersById, pointMarkers);
 
   out += dxfPair(0, "EOF");
   return out;
 }
 
-export function downloadDxf(layers, segments) {
+export function downloadDxf(layers, segments, pointMarkers = []) {
   const usable = segments.filter((s) => s.points.length >= 2);
-  if (usable.length === 0) {
+  if (usable.length === 0 && pointMarkers.length === 0) {
     alert("Disa aktarilacak tamamlanmis bir cizgi yok. Once en az bir olcum kaydet.");
     return false;
   }
 
-  const dxfText = buildDxfString(layers, usable);
+  const dxfText = buildDxfString(layers, usable, pointMarkers);
   const blob = new Blob([dxfText], { type: "application/dxf" });
   const url = URL.createObjectURL(blob);
 

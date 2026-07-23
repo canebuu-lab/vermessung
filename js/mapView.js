@@ -60,7 +60,8 @@ function latLngsFromPoints(points) {
   return points.map((p) => [p.lat, p.lng]);
 }
 
-export function drawFinishedSegment(segment, color, onEdgeClick, onVertexClick) {
+export function drawFinishedSegment(segment, color, options = {}) {
+  const { onEdgeClick, onVertexClick, onVertexTag, pointMarkerColors } = options;
   const existing = segmentLayers.get(segment.id);
   if (existing) map.removeLayer(existing);
   if (segment.points.length < 2) return;
@@ -101,6 +102,24 @@ export function drawFinishedSegment(segment, color, onEdgeClick, onVertexClick) 
         L.DomEvent.stopPropagation(e);
         onVertexClick(segment.id, idx);
       });
+    }
+    if (onVertexTag) {
+      marker.on("contextmenu", (e) => {
+        L.DomEvent.stopPropagation(e);
+        if (e.originalEvent) e.originalEvent.preventDefault();
+        onVertexTag(segment.id, idx, p.id);
+      });
+    }
+
+    // bu noktaya bir "nokta katmani" etiketlenmisse, etrafina ince bir renkli halka ciz
+    const ringColor = pointMarkerColors?.get(p.id);
+    if (ringColor) {
+      L.circleMarker([p.lat, p.lng], {
+        radius: 12,
+        color: ringColor,
+        weight: 3,
+        fill: false,
+      }).addTo(group);
     }
   });
 
