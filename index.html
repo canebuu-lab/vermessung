@@ -16,19 +16,31 @@
 <div id="app">
 
   <header id="topbar">
-    <button id="btnMenu" class="icon-btn" title="Katmanlar">☰</button>
-    <h1>Vermessung</h1>
+    <button id="btnMenu" class="icon-btn" title="Katmanlar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="7"/><line x1="12" y1="2.5" x2="12" y2="5.5"/><line x1="12" y1="18.5" x2="12" y2="21.5"/><line x1="2.5" y1="12" x2="5.5" y2="12"/><line x1="18.5" y1="12" x2="21.5" y2="12"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>
+      <div class="brand-text">
+        <h1>Vermessung</h1>
+        <span class="brand-sub">Saha Ölçüm Sistemi</span>
+      </div>
+    </div>
     <div id="gpsStatus" class="gps-status" title="GPS doğruluğu">
       <span id="gpsDot" class="gps-dot"></span>
       <span id="gpsAccuracyText">GPS bekleniyor…</span>
     </div>
-    <button id="btnToggleTracking" class="icon-btn tracking-toggle" title="Konum takibini durdur">📍</button>
+    <button id="btnToggleTracking" class="icon-btn tracking-toggle" title="Konum takibini durdur">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
+    </button>
   </header>
 
   <aside id="sidebar">
     <div class="sidebar-head">
       <h2>Katmanlar</h2>
-      <button id="btnCloseSidebar" class="icon-btn only-mobile">✕</button>
+      <button id="btnCloseSidebar" class="icon-btn only-mobile">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+      </button>
     </div>
 
     <div id="layerList" class="layer-list"></div>
@@ -57,8 +69,14 @@
       <h2>Proje</h2>
       <div class="stat-row"><span>Segment sayısı</span><span id="statSegments">0</span></div>
       <div class="stat-row"><span>Toplam nokta</span><span id="statPoints">0</span></div>
-      <button id="btnExportDxf" class="btn btn-accent btn-block">⇩ DXF Dışa Aktar</button>
-      <button id="btnClearAll" class="btn btn-danger-outline btn-block">Tüm Verileri Sil</button>
+      <button id="btnExportDxf" class="btn btn-accent btn-block">
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M5 20h14"/></svg>
+        DXF Dışa Aktar
+      </button>
+      <button id="btnClearAll" class="btn btn-danger-outline btn-block">
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4.8C9 4.36 9.36 4 9.8 4h4.4c.44 0 .8.36.8.8V7"/><path d="M18 7l-.8 12.2a1.5 1.5 0 0 1-1.5 1.4H8.3a1.5 1.5 0 0 1-1.5-1.4L6 7"/></svg>
+        Tüm Verileri Sil
+      </button>
       <p class="hint">Koordinat sistemi: ETRS89 / UTM Zone 32N (EPSG:25832)</p>
     </div>
   </aside>
@@ -69,12 +87,16 @@
     <div id="map"></div>
 
     <div id="recordBar" class="record-bar">
-      <button id="btnSwitchLayer" class="side-icon-btn" title="Katman değiştir" disabled>🔀</button>
+      <button id="btnSwitchLayer" class="side-icon-btn" title="Katman değiştir" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><polygon points="12,3 21,8.5 12,14 3,8.5"/><polyline points="3,14 12,19.5 21,14"/></svg>
+      </button>
       <div id="activeLayerTag" class="active-layer-tag">Katman seçilmedi</div>
       <button id="btnRecord" class="record-btn" disabled title="Nokta ekle">
         <span id="recordIcon">+</span>
       </button>
-      <button id="btnFinishLine" class="side-icon-btn finish-icon-btn" title="Bitir ve kaydet" disabled>🏁</button>
+      <button id="btnFinishLine" class="side-icon-btn finish-icon-btn" title="Bitir ve kaydet" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6.5L9.5 17 4.5 12"/></svg>
+      </button>
       <div id="recordInfo" class="record-info"></div>
     </div>
 
