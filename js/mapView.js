@@ -88,12 +88,12 @@ export function drawFinishedSegment(segment, color, options = {}) {
     }
   }
 
-  // her nokta cizgiye gore buyukce bir yuvarlak olarak gosterilir
+  // her nokta cizgiye gore buyukce bir yuvarlak olarak gosterilir (katmanin kendi rengiyle, beyaz kenarlik yok)
   points.forEach((p, idx) => {
     const marker = L.circleMarker([p.lat, p.lng], {
       radius: 8,
-      color: "#fff",
-      weight: 2,
+      color,
+      weight: 1,
       fillColor: color,
       fillOpacity: 1,
     }).addTo(group);
@@ -151,8 +151,8 @@ export function setLivePoints(points, color, onVertexClick) {
   liveVertexMarkers = points.map((p, idx) => {
     const marker = L.circleMarker([p.lat, p.lng], {
       radius: 9,
-      color: "#fff",
-      weight: 2,
+      color,
+      weight: 1,
       fillColor: color,
       fillOpacity: 1,
     }).addTo(map);
