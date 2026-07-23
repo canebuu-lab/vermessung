@@ -83,6 +83,7 @@ const pointLayerPickerOverlay = el("pointLayerPickerOverlay");
 const pointLayerPickerList = el("pointLayerPickerList");
 const btnClosePointPicker = el("btnClosePointPicker");
 const btnRemovePointMarker = el("btnRemovePointMarker");
+const btnDeletePoint = el("btnDeletePoint");
 
 // ---- runtime (persist edilmeyen) durum ----
 let lastPosition = null; // en son ham GPS okumasi (marker/durum icin)
@@ -222,15 +223,6 @@ function handleDeleteFinishedEdge(segmentId, edgeIdx) {
   }
 }
 
-// ---- bitmis bir cizgide tek bir noktaya tiklaninca sadece o noktayi sil ----
-function handleDeleteFinishedVertex(segmentId, idx) {
-  if (confirm("Bu nokta silinsin mi?")) {
-    removePointFromSegment(segmentId, idx);
-  }
-}
-
-let taggingPointId = null;
-
 // ---- bitmis segmentleri haritada ciz ----
 function renderSegmentsOnMap() {
   const state = getState();
@@ -248,8 +240,7 @@ function renderSegmentsOnMap() {
     if (!layer) continue;
     drawFinishedSegment(seg, layer.color, {
       onEdgeClick: handleDeleteFinishedEdge,
-      onVertexClick: handleDeleteFinishedVertex,
-      onVertexTag: (segmentId, idx, pointId) => openPointLayerPicker(pointId),
+      onVertexClick: (segmentId, idx, pointId) => openPointLayerPicker(segmentId, idx, pointId),
       pointMarkerColors,
     });
   }
@@ -454,11 +445,13 @@ layerPickerOverlay.addEventListener("click", (e) => {
   if (e.target === layerPickerOverlay) closeLayerPicker();
 });
 
-// ---- bir noktaya "nokta katmani" etiketi secme popup'i ----
-function openPointLayerPicker(pointId) {
+// ---- bir noktaya tiklaninca acilan: nokta katmani sec / etiketi kaldir / noktayi sil ----
+let taggingContext = null; // { segmentId, idx, pointId }
+
+function openPointLayerPicker(segmentId, idx, pointId) {
   const state = getState();
   const pointLayers = state.layers.filter((l) => l.type === "point");
-  taggingPointId = pointId;
+  taggingContext = { segmentId, idx, pointId };
 
   pointLayerPickerList.innerHTML = "";
   if (pointLayers.length === 0) {
@@ -493,12 +486,19 @@ function openPointLayerPicker(pointId) {
   pointLayerPickerOverlay.classList.remove("hidden");
 }
 function closePointLayerPicker() {
-  taggingPointId = null;
+  taggingContext = null;
   pointLayerPickerOverlay.classList.add("hidden");
 }
 btnClosePointPicker.addEventListener("click", closePointLayerPicker);
 btnRemovePointMarker.addEventListener("click", () => {
-  if (taggingPointId) removePointMarker(taggingPointId);
+  if (taggingContext) removePointMarker(taggingContext.pointId);
+  closePointLayerPicker();
+});
+btnDeletePoint.addEventListener("click", () => {
+  if (!taggingContext) return;
+  if (confirm("Bu nokta silinsin mi?")) {
+    removePointFromSegment(taggingContext.segmentId, taggingContext.idx);
+  }
   closePointLayerPicker();
 });
 pointLayerPickerOverlay.addEventListener("click", (e) => {

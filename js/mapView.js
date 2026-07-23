@@ -61,7 +61,7 @@ function latLngsFromPoints(points) {
 }
 
 export function drawFinishedSegment(segment, color, options = {}) {
-  const { onEdgeClick, onVertexClick, onVertexTag, pointMarkerColors } = options;
+  const { onEdgeClick, onVertexClick, pointMarkerColors } = options;
   const existing = segmentLayers.get(segment.id);
   if (existing) map.removeLayer(existing);
   if (segment.points.length < 2) return;
@@ -100,14 +100,7 @@ export function drawFinishedSegment(segment, color, options = {}) {
     if (onVertexClick) {
       marker.on("click", (e) => {
         L.DomEvent.stopPropagation(e);
-        onVertexClick(segment.id, idx);
-      });
-    }
-    if (onVertexTag) {
-      marker.on("contextmenu", (e) => {
-        L.DomEvent.stopPropagation(e);
-        if (e.originalEvent) e.originalEvent.preventDefault();
-        onVertexTag(segment.id, idx, p.id);
+        onVertexClick(segment.id, idx, p.id);
       });
     }
 
