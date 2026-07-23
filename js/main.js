@@ -28,10 +28,10 @@ import {
   ACCURACY_WARN_M,
   ACCURACY_BAD_M,
 } from "./gpsRecorder.js";
+import { downloadDxf } from "./dxfExport.js";
 
 const SAMPLE_WINDOW_MS = 3000; // nokta eklerken ortalamasi alinacak son okuma penceresi
 const MARKER_SMOOTHING = 0.35; // haritadaki konum noktasi titremesini azaltmak icin (0-1)
-import { downloadDxf } from "./dxfExport.js";
 
 // ---- DOM ----
 const el = (id) => document.getElementById(id);
@@ -59,7 +59,13 @@ const gpsAccuracyText = el("gpsAccuracyText");
 const activeLayerTag = el("activeLayerTag");
 const btnRecord = el("btnRecord");
 const btnFinishLine = el("btnFinishLine");
+const btnSwitchLayer = el("btnSwitchLayer");
 const recordInfo = el("recordInfo");
+const toast = el("toast");
+
+const layerPickerOverlay = el("layerPickerOverlay");
+const layerPickerList = el("layerPickerList");
+const btnClosePicker = el("btnClosePicker");
 
 // ---- runtime (persist edilmeyen) durum ----
 let lastPosition = null; // en son ham GPS okumasi (marker/durum icin)
@@ -201,7 +207,8 @@ function renderTopStatus() {
 
   btnRecord.disabled = !active;
   btnRecord.classList.toggle("recording", lineActive);
-  btnFinishLine.classList.toggle("hidden", !lineActive);
+  btnFinishLine.disabled = !lineActive;
+  btnSwitchLayer.disabled = state.layers.length === 0;
 }
 
 function renderAll() {
@@ -299,6 +306,56 @@ function finishCurrentLine() {
   renderTopStatus();
 }
 
+// ---- kisa bilgi baloncugu ----
+let toastTimer = null;
+function showToast(message) {
+  toast.textContent = message;
+  toast.classList.remove("hidden");
+  requestAnimationFrame(() => toast.classList.add("show"));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove("show");
+    setTimeout(() => toast.classList.add("hidden"), 250);
+  }, 1500);
+}
+
+// ---- hizli katman degistirme popup'i ----
+function openLayerPicker() {
+  const state = getState();
+  layerPickerList.innerHTML = "";
+  for (const layer of state.layers) {
+    const item = document.createElement("div");
+    item.className = "layer-picker-item" + (layer.id === state.activeLayerId ? " active" : "");
+
+    const swatch = document.createElement("div");
+    swatch.className = "layer-swatch";
+    swatch.style.background = layer.color;
+
+    const name = document.createElement("div");
+    name.textContent = layer.name;
+
+    item.appendChild(swatch);
+    item.appendChild(name);
+    item.addEventListener("click", () => {
+      if (layer.id !== state.activeLayerId) {
+        if (isLineInProgress()) finishCurrentLine();
+        setActiveLayer(layer.id);
+      }
+      closeLayerPicker();
+    });
+    layerPickerList.appendChild(item);
+  }
+  layerPickerOverlay.classList.remove("hidden");
+}
+function closeLayerPicker() {
+  layerPickerOverlay.classList.add("hidden");
+}
+btnSwitchLayer.addEventListener("click", openLayerPicker);
+btnClosePicker.addEventListener("click", closeLayerPicker);
+layerPickerOverlay.addEventListener("click", (e) => {
+  if (e.target === layerPickerOverlay) closeLayerPicker();
+});
+
 // ---- + : aktif katmana nokta ekle (onceki nokta varsa duz cizgiyle baglar) ----
 btnRecord.addEventListener("click", () => {
   const active = getActiveLayer();
@@ -330,8 +387,11 @@ btnRecord.addEventListener("click", () => {
   renderTopStatus();
 });
 
-// ---- Bitir: mevcut cizgiyi kapat, bir sonraki + yeni bir cizgi baslatir ----
-btnFinishLine.addEventListener("click", finishCurrentLine);
+// ---- Bitir ve Kaydet: mevcut cizgiyi kapatir (veri zaten surekli localStorage'a yazilir) ----
+btnFinishLine.addEventListener("click", () => {
+  finishCurrentLine();
+  showToast("Kaydedildi ✓");
+});
 
 // ---- DXF export ----
 btnExportDxf.addEventListener("click", () => {

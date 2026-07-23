@@ -241,12 +241,97 @@ hr { border: none; border-top: 1px solid #1f2937; margin: 4px 0; }
 #recordIcon { visibility: hidden; }
 #recordIcon::before { visibility: visible; display: block; }
 
-.finish-btn {
-  padding: 10px 14px;
-  border-radius: 999px;
-  white-space: nowrap;
+.side-icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: #1f2937;
+  color: #e2e8f0;
+  font-size: 20px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
-.finish-btn.hidden { display: none; }
+.side-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.finish-icon-btn {
+  background: #14532d;
+}
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  background: #16a34a;
+  color: white;
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 600;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.toast.show { opacity: 1; }
+.toast.hidden { display: none; }
+
+.layer-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 2000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.layer-picker-overlay.hidden { display: none; }
+.layer-picker-panel {
+  background: #111827;
+  border-radius: 16px 16px 0 0;
+  padding: 16px;
+  width: 100%;
+  max-width: 420px;
+  max-height: 70vh;
+  overflow-y: auto;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.5);
+}
+.layer-picker-panel h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: #cbd5e1;
+}
+.layer-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.layer-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #1a2334;
+  border: 2px solid transparent;
+  cursor: pointer;
+  font-size: 15px;
+}
+.layer-picker-item.active { border-color: #38bdf8; }
+.layer-picker-item:active { background: #22314a; }
+
+@media (min-width: 821px) {
+  .layer-picker-overlay { align-items: center; }
+  .layer-picker-panel { border-radius: 16px; }
+}
 
 @keyframes pulse {
   0% { box-shadow: 0 0 0 4px rgba(239,68,68,0.25); }

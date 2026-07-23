@@ -64,14 +64,25 @@
     <div id="map"></div>
 
     <div id="recordBar" class="record-bar">
+      <button id="btnSwitchLayer" class="side-icon-btn" title="Katman değiştir" disabled>🎨</button>
       <div id="activeLayerTag" class="active-layer-tag">Katman seçilmedi</div>
       <button id="btnRecord" class="record-btn" disabled title="Nokta ekle">
         <span id="recordIcon">+</span>
       </button>
-      <button id="btnFinishLine" class="btn btn-ghost finish-btn hidden">Bitir</button>
+      <button id="btnFinishLine" class="side-icon-btn finish-icon-btn" title="Bitir ve kaydet" disabled>🏁</button>
       <div id="recordInfo" class="record-info"></div>
     </div>
+
+    <div id="toast" class="toast hidden"></div>
   </main>
+
+  <div id="layerPickerOverlay" class="layer-picker-overlay hidden">
+    <div class="layer-picker-panel">
+      <h3>Katman seç</h3>
+      <div id="layerPickerList" class="layer-picker-list"></div>
+      <button id="btnClosePicker" class="btn btn-ghost btn-block">Kapat</button>
+    </div>
+  </div>
 
 </div>
 
