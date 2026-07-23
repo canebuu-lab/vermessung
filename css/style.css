@@ -239,9 +239,11 @@ hr { border: none; border-top: 1px solid #1f2937; margin: 4px 0; }
   background: #16a34a;
   animation: pulse 1.4s infinite;
 }
-#recordIcon::before { content: "+"; }
-#recordIcon { visibility: hidden; }
-#recordIcon::before { visibility: visible; display: block; }
+.record-btn.capturing {
+  background: #d97706;
+  animation: pulse 0.8s infinite;
+  font-size: 18px;
+}
 
 .side-icon-btn {
   width: 44px;

@@ -33,8 +33,9 @@ import {
 } from "./gpsRecorder.js";
 import { downloadDxf } from "./dxfExport.js";
 
-const SAMPLE_WINDOW_MS = 3000; // nokta eklerken ortalamasi alinacak son okuma penceresi
+const SAMPLE_WINDOW_MS = 3000; // haritadaki konum noktasi icin son okuma penceresi
 const MARKER_SMOOTHING = 0.35; // haritadaki konum noktasi titremesini azaltmak icin (0-1)
+const CAPTURE_DURATION_MS = 6000; // nokta eklerken GPS ornegi toplama suresi (daha stabil nokta icin)
 
 // ---- DOM ----
 const el = (id) => document.getElementById(id);
@@ -62,6 +63,7 @@ const btnToggleTracking = el("btnToggleTracking");
 
 const activeLayerTag = el("activeLayerTag");
 const btnRecord = el("btnRecord");
+const recordIcon = el("recordIcon");
 const btnFinishLine = el("btnFinishLine");
 const btnSwitchLayer = el("btnSwitchLayer");
 const recordInfo = el("recordInfo");
@@ -78,6 +80,8 @@ let smoothedMarkerPos = null; // haritadaki mavi nokta icin yumusatilmis konum
 let recordDistance = 0;
 let watchId = null;
 let trackingEnabled = true;
+let capturing = false;
+let captureBuffer = [];
 
 function isLineInProgress() {
   return getCurrentSegment() != null;
@@ -223,10 +227,11 @@ function renderTopStatus() {
     activeLayerTag.textContent = "Katman secilmedi";
   }
 
-  btnRecord.disabled = !active || !trackingEnabled;
+  btnRecord.disabled = !active || !trackingEnabled || capturing;
   btnRecord.classList.toggle("recording", lineActive);
-  btnFinishLine.disabled = !lineActive;
-  btnSwitchLayer.disabled = state.layers.length === 0;
+  btnRecord.classList.toggle("capturing", capturing);
+  btnFinishLine.disabled = !lineActive || capturing;
+  btnSwitchLayer.disabled = state.layers.length === 0 || capturing;
 }
 
 function renderAll() {
@@ -263,24 +268,26 @@ function renderRecordInfo() {
   recordInfo.textContent = `${count} nokta · ${recordDistance.toFixed(1)} m`;
 }
 
-// ---- son GPS okumalarinin ortalamasini alarak daha stabil bir nokta uret ----
-function getAveragedPosition() {
-  if (recentSamples.length === 0) return lastPosition;
-  const sum = recentSamples.reduce(
-    (acc, p) => {
-      acc.lat += p.lat;
-      acc.lng += p.lng;
-      acc.accuracy = Math.min(acc.accuracy, p.accuracy ?? Infinity);
-      return acc;
-    },
-    { lat: 0, lng: 0, accuracy: Infinity }
-  );
-  const n = recentSamples.length;
+// ---- GPS orneklerinin dogruluga gore agirlikli ortalamasini al (daha stabil nokta icin) ----
+function weightedAveragePosition(samples) {
+  if (samples.length === 0) return null;
+  let sumLat = 0;
+  let sumLng = 0;
+  let sumWeight = 0;
+  let bestAccuracy = Infinity;
+  for (const p of samples) {
+    const acc = p.accuracy && p.accuracy > 0 ? p.accuracy : 15;
+    const weight = 1 / (acc * acc);
+    sumLat += p.lat * weight;
+    sumLng += p.lng * weight;
+    sumWeight += weight;
+    bestAccuracy = Math.min(bestAccuracy, acc);
+  }
   return {
-    lat: sum.lat / n,
-    lng: sum.lng / n,
-    alt: recentSamples[recentSamples.length - 1].alt,
-    accuracy: sum.accuracy,
+    lat: sumLat / sumWeight,
+    lng: sumLng / sumWeight,
+    alt: samples[samples.length - 1].alt,
+    accuracy: bestAccuracy,
     t: Date.now(),
   };
 }
@@ -303,6 +310,8 @@ function onGpsPosition(pos) {
   centerOnUserOnce(pos.lat, pos.lng);
 
   lastPosition = pos;
+
+  if (capturing) captureBuffer.push(pos);
 }
 
 function onGpsError(err) {
@@ -435,17 +444,8 @@ function handleDeleteVertex(segmentId, idx) {
   renderTopStatus();
 }
 
-// ---- + : aktif katmana nokta ekle (onceki nokta varsa duz cizgiyle baglar) ----
-btnRecord.addEventListener("click", () => {
-  const active = getActiveLayer();
-  if (!active) return;
-
-  const point = getAveragedPosition();
-  if (!point) {
-    alert("GPS konumu henuz alinamadi, birazdan tekrar dene.");
-    return;
-  }
-
+// ---- + : birkac saniye GPS ornegi toplayip agirlikli ortalamayla nokta ekler ----
+function addCapturedPoint(active, point) {
   let seg = getCurrentSegment();
   if (!seg) {
     recordDistance = 0;
@@ -463,7 +463,43 @@ btnRecord.addEventListener("click", () => {
   appendPoint(seg.id, point);
   setLivePoints(seg.points, active.color, (idx) => handleDeleteVertex(seg.id, idx));
   renderRecordInfo();
+}
+
+let captureCountdownTimer = null;
+let captureFinishTimer = null;
+
+btnRecord.addEventListener("click", () => {
+  const active = getActiveLayer();
+  if (!active || capturing || !trackingEnabled) return;
+
+  capturing = true;
+  captureBuffer = [];
+  recordIcon.textContent = String(Math.ceil(CAPTURE_DURATION_MS / 1000));
+  recordInfo.textContent = "Konum olculuyor, sabit dur…";
   renderTopStatus();
+
+  let remainingSec = Math.ceil(CAPTURE_DURATION_MS / 1000);
+  captureCountdownTimer = setInterval(() => {
+    remainingSec -= 1;
+    if (remainingSec > 0) recordIcon.textContent = String(remainingSec);
+  }, 1000);
+
+  captureFinishTimer = setTimeout(() => {
+    clearInterval(captureCountdownTimer);
+    capturing = false;
+    recordIcon.textContent = "+";
+
+    const point = weightedAveragePosition(captureBuffer.length > 0 ? captureBuffer : lastPosition ? [lastPosition] : []);
+    if (!point) {
+      alert("GPS konumu alinamadi, tekrar dene.");
+      renderRecordInfo();
+      renderTopStatus();
+      return;
+    }
+
+    addCapturedPoint(active, point);
+    renderTopStatus();
+  }, CAPTURE_DURATION_MS);
 });
 
 // ---- Bitir ve Kaydet: mevcut cizgiyi kapatir (veri zaten surekli localStorage'a yazilir) ----
