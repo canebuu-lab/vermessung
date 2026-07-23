@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Vermessung – Saha Ölçüm</title>
+<meta name="theme-color" content="#0f172a" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icons/icon-192.svg" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <header id="topbar">
+    <button id="btnMenu" class="icon-btn" title="Katmanlar">☰</button>
+    <h1>Vermessung</h1>
+    <div id="gpsStatus" class="gps-status" title="GPS doğruluğu">
+      <span id="gpsDot" class="gps-dot"></span>
+      <span id="gpsAccuracyText">GPS bekleniyor…</span>
+    </div>
+  </header>
+
+  <aside id="sidebar">
+    <div class="sidebar-head">
+      <h2>Katmanlar</h2>
+      <button id="btnCloseSidebar" class="icon-btn only-mobile">✕</button>
+    </div>
+
+    <div id="layerList" class="layer-list"></div>
+
+    <button id="btnAddLayer" class="btn btn-primary btn-block">+ Yeni Katman</button>
+
+    <div id="addLayerForm" class="add-layer-form hidden">
+      <input id="newLayerName" type="text" placeholder="Katman adı (ör. Asfalt)" maxlength="40" />
+      <div class="color-row">
+        <input id="newLayerColor" type="color" value="#ff5722" />
+        <span>Renk</span>
+      </div>
+      <div class="form-actions">
+        <button id="btnCancelLayer" class="btn btn-ghost">İptal</button>
+        <button id="btnSaveLayer" class="btn btn-primary">Ekle</button>
+      </div>
+    </div>
+
+    <hr />
+
+    <div class="sidebar-section">
+      <h2>Proje</h2>
+      <div class="stat-row"><span>Segment sayısı</span><span id="statSegments">0</span></div>
+      <div class="stat-row"><span>Toplam nokta</span><span id="statPoints">0</span></div>
+      <button id="btnExportDxf" class="btn btn-accent btn-block">⇩ DXF Dışa Aktar</button>
+      <button id="btnClearAll" class="btn btn-danger-outline btn-block">Tüm Verileri Sil</button>
+      <p class="hint">Koordinat sistemi: ETRS89 / UTM Zone 32N (EPSG:25832)</p>
+    </div>
+  </aside>
+
+  <div id="sidebarOverlay" class="sidebar-overlay hidden"></div>
+
+  <main id="mapWrap">
+    <div id="map"></div>
+
+    <div id="recordBar" class="record-bar">
+      <div id="activeLayerTag" class="active-layer-tag">Katman seçilmedi</div>
+      <button id="btnRecord" class="record-btn" disabled>
+        <span id="recordIcon">+</span>
+      </button>
+      <div id="recordInfo" class="record-info"></div>
+    </div>
+  </main>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
