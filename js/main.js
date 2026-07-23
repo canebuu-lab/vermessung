@@ -25,6 +25,7 @@ import {
 } from "./mapView.js";
 import {
   startWatch,
+  stopWatch,
   haversineMeters,
   MIN_POINT_DISTANCE_M,
   ACCURACY_WARN_M,
@@ -57,6 +58,7 @@ const btnClearAll = el("btnClearAll");
 
 const gpsDot = el("gpsDot");
 const gpsAccuracyText = el("gpsAccuracyText");
+const btnToggleTracking = el("btnToggleTracking");
 
 const activeLayerTag = el("activeLayerTag");
 const btnRecord = el("btnRecord");
@@ -74,6 +76,8 @@ let lastPosition = null; // en son ham GPS okumasi (marker/durum icin)
 let recentSamples = []; // nokta eklerken ortalama almak icin son okumalar
 let smoothedMarkerPos = null; // haritadaki mavi nokta icin yumusatilmis konum
 let recordDistance = 0;
+let watchId = null;
+let trackingEnabled = true;
 
 function isLineInProgress() {
   return getCurrentSegment() != null;
@@ -219,7 +223,7 @@ function renderTopStatus() {
     activeLayerTag.textContent = "Katman secilmedi";
   }
 
-  btnRecord.disabled = !active;
+  btnRecord.disabled = !active || !trackingEnabled;
   btnRecord.classList.toggle("recording", lineActive);
   btnFinishLine.disabled = !lineActive;
   btnSwitchLayer.disabled = state.layers.length === 0;
@@ -281,34 +285,59 @@ function getAveragedPosition() {
   };
 }
 
-// ---- GPS izleme baslat (harita ustundeki konum + durum gostergesi icin surekli) ----
-startWatch(
-  (pos) => {
-    setGpsStatus(pos.accuracy);
+// ---- GPS izleme baslat/durdur (harita ustundeki konum + durum gostergesi icin) ----
+function onGpsPosition(pos) {
+  setGpsStatus(pos.accuracy);
 
-    const now = Date.now();
-    recentSamples.push(pos);
-    recentSamples = recentSamples.filter((p) => now - (p.t ?? now) < SAMPLE_WINDOW_MS);
+  const now = Date.now();
+  recentSamples.push(pos);
+  recentSamples = recentSamples.filter((p) => now - (p.t ?? now) < SAMPLE_WINDOW_MS);
 
-    if (!smoothedMarkerPos) {
-      smoothedMarkerPos = { lat: pos.lat, lng: pos.lng };
-    } else {
-      smoothedMarkerPos.lat += (pos.lat - smoothedMarkerPos.lat) * MARKER_SMOOTHING;
-      smoothedMarkerPos.lng += (pos.lng - smoothedMarkerPos.lng) * MARKER_SMOOTHING;
-    }
-    updateUserMarker(smoothedMarkerPos.lat, smoothedMarkerPos.lng, pos.accuracy);
-    centerOnUserOnce(pos.lat, pos.lng);
-
-    lastPosition = pos;
-  },
-  (err) => {
-    console.warn(err);
-    gpsDot.classList.remove("ok", "warn");
-    gpsDot.classList.add("bad");
-    gpsAccuracyText.textContent =
-      err.code === 1 ? "Konum izni reddedildi" : "GPS hatasi";
+  if (!smoothedMarkerPos) {
+    smoothedMarkerPos = { lat: pos.lat, lng: pos.lng };
+  } else {
+    smoothedMarkerPos.lat += (pos.lat - smoothedMarkerPos.lat) * MARKER_SMOOTHING;
+    smoothedMarkerPos.lng += (pos.lng - smoothedMarkerPos.lng) * MARKER_SMOOTHING;
   }
-);
+  updateUserMarker(smoothedMarkerPos.lat, smoothedMarkerPos.lng, pos.accuracy);
+  centerOnUserOnce(pos.lat, pos.lng);
+
+  lastPosition = pos;
+}
+
+function onGpsError(err) {
+  console.warn(err);
+  gpsDot.classList.remove("ok", "warn");
+  gpsDot.classList.add("bad");
+  gpsAccuracyText.textContent = err.code === 1 ? "Konum izni reddedildi" : "GPS hatasi";
+}
+
+function enableTracking() {
+  if (watchId != null) return;
+  watchId = startWatch(onGpsPosition, onGpsError);
+  trackingEnabled = true;
+  btnToggleTracking.classList.remove("off");
+  btnToggleTracking.title = "Konum takibini durdur";
+  renderTopStatus();
+}
+
+function disableTracking() {
+  stopWatch(watchId);
+  watchId = null;
+  trackingEnabled = false;
+  gpsDot.classList.remove("ok", "warn", "bad");
+  gpsAccuracyText.textContent = "Takip kapalı";
+  btnToggleTracking.classList.add("off");
+  btnToggleTracking.title = "Konum takibini başlat";
+  renderTopStatus();
+}
+
+btnToggleTracking.addEventListener("click", () => {
+  if (trackingEnabled) disableTracking();
+  else enableTracking();
+});
+
+enableTracking();
 
 // ---- cizgiyi tamamla ----
 function finishCurrentLine() {

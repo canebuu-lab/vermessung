@@ -66,6 +66,8 @@ body {
 .gps-dot.warn { background: #eab308; }
 .gps-dot.bad { background: #ef4444; }
 
+.tracking-toggle.off { opacity: 0.4; }
+
 #sidebar {
   grid-area: side;
   background: #111827;
