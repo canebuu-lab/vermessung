@@ -111,12 +111,6 @@ export function getCurrentSegment() {
   return state.segments.find((s) => s.id === state.currentSegmentId) ?? null;
 }
 
-export function deleteSegment(segmentId) {
-  state.segments = state.segments.filter((s) => s.id !== segmentId);
-  if (state.currentSegmentId === segmentId) state.currentSegmentId = null;
-  emit();
-}
-
 // keepCount kadar nokta birakip gerisini atar (0 ise segmenti tamamen kaldirir)
 export function truncateSegmentPoints(segmentId, keepCount) {
   const seg = state.segments.find((s) => s.id === segmentId);
@@ -126,6 +120,36 @@ export function truncateSegmentPoints(segmentId, keepCount) {
     state.segments = state.segments.filter((s) => s.id !== segmentId);
     if (state.currentSegmentId === segmentId) state.currentSegmentId = null;
   }
+  emit();
+}
+
+// bitmis bir segmentten tek bir noktayi kaldirir (2 noktanin altina duserse segment tamamen silinir)
+export function removePointFromSegment(segmentId, idx) {
+  const seg = state.segments.find((s) => s.id === segmentId);
+  if (!seg) return;
+  seg.points.splice(idx, 1);
+  if (seg.points.length < 2) {
+    state.segments = state.segments.filter((s) => s.id !== segmentId);
+  }
+  emit();
+}
+
+// iki nokta arasindaki baglantiyi keser, segmenti iki ayri cizgiye boler
+export function splitSegmentAtEdge(segmentId, edgeIdx) {
+  const idx = state.segments.findIndex((s) => s.id === segmentId);
+  if (idx === -1) return;
+  const seg = state.segments[idx];
+  const firstPoints = seg.points.slice(0, edgeIdx + 1);
+  const secondPoints = seg.points.slice(edgeIdx + 1);
+
+  const replacements = [];
+  if (firstPoints.length >= 2) {
+    replacements.push({ id: uid(), layerId: seg.layerId, points: firstPoints, createdAt: seg.createdAt, finishedAt: Date.now() });
+  }
+  if (secondPoints.length >= 2) {
+    replacements.push({ id: uid(), layerId: seg.layerId, points: secondPoints, createdAt: seg.createdAt, finishedAt: Date.now() });
+  }
+  state.segments.splice(idx, 1, ...replacements);
   emit();
 }
 

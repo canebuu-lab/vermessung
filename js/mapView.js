@@ -60,25 +60,49 @@ function latLngsFromPoints(points) {
   return points.map((p) => [p.lat, p.lng]);
 }
 
-export function drawFinishedSegment(segment, color, onClick) {
+export function drawFinishedSegment(segment, color, onEdgeClick, onVertexClick) {
   const existing = segmentLayers.get(segment.id);
   if (existing) map.removeLayer(existing);
   if (segment.points.length < 2) return;
 
-  const latlngs = latLngsFromPoints(segment.points);
   const group = L.layerGroup().addTo(map);
-  // dokunma alanini genisletmek icin gorunmez kalin bir "hit" cizgisi
-  const hitLine = L.polyline(latlngs, { color, weight: 22, opacity: 0 }).addTo(group);
-  const visibleLine = L.polyline(latlngs, { color, weight: 4, opacity: 0.9 }).addTo(group);
+  const points = segment.points;
 
-  if (onClick) {
-    const handler = (e) => {
-      L.DomEvent.stopPropagation(e);
-      onClick(segment.id);
-    };
-    hitLine.on("click", handler);
-    visibleLine.on("click", handler);
+  // her iki nokta arasi ayri bir "kenar" olarak cizilir ki tek tek silinebilsin
+  for (let i = 0; i < points.length - 1; i++) {
+    const edgeLatLngs = [
+      [points[i].lat, points[i].lng],
+      [points[i + 1].lat, points[i + 1].lng],
+    ];
+    const hitLine = L.polyline(edgeLatLngs, { color, weight: 22, opacity: 0 }).addTo(group);
+    const visibleLine = L.polyline(edgeLatLngs, { color, weight: 4, opacity: 0.9 }).addTo(group);
+    if (onEdgeClick) {
+      const edgeIdx = i;
+      const handler = (e) => {
+        L.DomEvent.stopPropagation(e);
+        onEdgeClick(segment.id, edgeIdx);
+      };
+      hitLine.on("click", handler);
+      visibleLine.on("click", handler);
+    }
   }
+
+  // her nokta cizgiye gore buyukce bir yuvarlak olarak gosterilir
+  points.forEach((p, idx) => {
+    const marker = L.circleMarker([p.lat, p.lng], {
+      radius: 8,
+      color: "#fff",
+      weight: 2,
+      fillColor: color,
+      fillOpacity: 1,
+    }).addTo(group);
+    if (onVertexClick) {
+      marker.on("click", (e) => {
+        L.DomEvent.stopPropagation(e);
+        onVertexClick(segment.id, idx);
+      });
+    }
+  });
 
   segmentLayers.set(segment.id, group);
 }

@@ -11,8 +11,9 @@ import {
   getCurrentSegment,
   clearAll,
   nextDefaultColor,
-  deleteSegment,
   truncateSegmentPoints,
+  removePointFromSegment,
+  splitSegmentAtEdge,
 } from "./state.js";
 import {
   initMap,
@@ -183,15 +184,17 @@ function renderLayers() {
   }
 }
 
-// ---- bitmis bir cizgiye tiklaninca komple sil ----
-function handleDeleteFinishedSegment(segmentId) {
-  const state = getState();
-  const seg = state.segments.find((s) => s.id === segmentId);
-  if (!seg) return;
-  const layer = state.layers.find((l) => l.id === seg.layerId);
-  const name = layer ? layer.name : "bilinmeyen katman";
-  if (confirm(`"${name}" katmanindaki bu cizgi tamamen silinsin mi? (${seg.points.length} nokta)`)) {
-    deleteSegment(segmentId);
+// ---- bitmis bir cizgide iki nokta arasindaki baglantiya tiklaninca sadece o baglantiyi kes ----
+function handleDeleteFinishedEdge(segmentId, edgeIdx) {
+  if (confirm("Bu iki nokta arasindaki baglanti silinsin mi? (cizgi buradan ikiye ayrilir)")) {
+    splitSegmentAtEdge(segmentId, edgeIdx);
+  }
+}
+
+// ---- bitmis bir cizgide tek bir noktaya tiklaninca sadece o noktayi sil ----
+function handleDeleteFinishedVertex(segmentId, idx) {
+  if (confirm("Bu nokta silinsin mi?")) {
+    removePointFromSegment(segmentId, idx);
   }
 }
 
@@ -205,7 +208,7 @@ function renderSegmentsOnMap() {
     if (seg.points.length < 2) continue;
     const layer = layersById.get(seg.layerId);
     if (!layer) continue;
-    drawFinishedSegment(seg, layer.color, handleDeleteFinishedSegment);
+    drawFinishedSegment(seg, layer.color, handleDeleteFinishedEdge, handleDeleteFinishedVertex);
   }
 }
 
