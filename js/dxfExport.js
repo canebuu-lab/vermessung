@@ -38,11 +38,23 @@ function buildEntities(segments, layersById, pointMarkers) {
   out += dxfPair(2, "ENTITIES");
 
   for (const segment of segments) {
-    if (segment.points.length < 2) continue;
+    if (segment.points.length < 1) continue;
     const layer = layersById.get(segment.layerId);
     if (!layer) continue;
     const trueColor = hexToTrueColorInt(layer.color);
     const layerName = sanitizeLayerName(layer.name);
+
+    if (segment.points.length === 1) {
+      // tek nokta - bir cizgi degil, bir isaret/flama
+      const { x, y } = wgs84ToTarget(segment.points[0].lat, segment.points[0].lng);
+      out += dxfPair(0, "CIRCLE");
+      out += dxfPair(8, layerName);
+      out += dxfPair(420, trueColor);
+      out += dxfPair(10, x.toFixed(3));
+      out += dxfPair(20, y.toFixed(3));
+      out += dxfPair(40, "0.15");
+      continue;
+    }
 
     out += dxfPair(0, "LWPOLYLINE");
     out += dxfPair(8, layerName);
@@ -120,9 +132,9 @@ export function buildDxfString(layers, segments, pointMarkers = []) {
 }
 
 export function downloadDxf(layers, segments, pointMarkers = []) {
-  const usable = segments.filter((s) => s.points.length >= 2);
+  const usable = segments.filter((s) => s.points.length >= 1);
   if (usable.length === 0 && pointMarkers.length === 0) {
-    alert("Disa aktarilacak tamamlanmis bir cizgi yok. Once en az bir olcum kaydet.");
+    alert("Disa aktarilacak bir olcum yok. Once en az bir nokta ekle.");
     return false;
   }
 

@@ -118,8 +118,8 @@ export function finishSegment(segmentId) {
   const seg = state.segments.find((s) => s.id === segmentId);
   if (seg) seg.finishedAt = Date.now();
   if (state.currentSegmentId === segmentId) state.currentSegmentId = null;
-  if (seg && seg.points.length < 2) {
-    // tek nokta/bos segment - anlamsiz, temizle
+  if (seg && seg.points.length < 1) {
+    // tamamen bos segment - anlamsiz, temizle. Tek nokta ise bir isaret/flama olarak kalir.
     state.segments = state.segments.filter((s) => s.id !== segmentId);
   }
   emit();
@@ -141,18 +141,18 @@ export function truncateSegmentPoints(segmentId, keepCount) {
   emit();
 }
 
-// bitmis bir segmentten tek bir noktayi kaldirir (2 noktanin altina duserse segment tamamen silinir)
+// bitmis bir segmentten tek bir noktayi kaldirir (0 noktaya duserse segment tamamen silinir, 1 kalirsa isaret olarak durur)
 export function removePointFromSegment(segmentId, idx) {
   const seg = state.segments.find((s) => s.id === segmentId);
   if (!seg) return;
   seg.points.splice(idx, 1);
-  if (seg.points.length < 2) {
+  if (seg.points.length < 1) {
     state.segments = state.segments.filter((s) => s.id !== segmentId);
   }
   emit();
 }
 
-// iki nokta arasindaki baglantiyi keser, segmenti iki ayri cizgiye boler
+// iki nokta arasindaki baglantiyi keser, segmenti iki ayri cizgiye/isarete boler
 export function splitSegmentAtEdge(segmentId, edgeIdx) {
   const idx = state.segments.findIndex((s) => s.id === segmentId);
   if (idx === -1) return;
@@ -161,10 +161,10 @@ export function splitSegmentAtEdge(segmentId, edgeIdx) {
   const secondPoints = seg.points.slice(edgeIdx + 1);
 
   const replacements = [];
-  if (firstPoints.length >= 2) {
+  if (firstPoints.length >= 1) {
     replacements.push({ id: uid(), layerId: seg.layerId, points: firstPoints, createdAt: seg.createdAt, finishedAt: Date.now() });
   }
-  if (secondPoints.length >= 2) {
+  if (secondPoints.length >= 1) {
     replacements.push({ id: uid(), layerId: seg.layerId, points: secondPoints, createdAt: seg.createdAt, finishedAt: Date.now() });
   }
   state.segments.splice(idx, 1, ...replacements);

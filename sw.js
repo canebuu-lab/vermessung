@@ -1,4 +1,4 @@
-const CACHE_NAME = "vermessung-v1";
+const CACHE_NAME = "vermessung-v2";
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -31,21 +31,21 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+// Once internetten guncel dosyayi cekmeye calisir (network-first); sadece cevrimdisiyken
+// veya istek basarisiz olursa onbellekten doner. Boylece internet varken her zaman en
+// guncel surum gosterilir, cevrimdisiyken de uygulama acilabilir.
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const clone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return networkResponse;
-        })
-        .catch(() => cached);
-      return cached || fetchPromise;
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return networkResponse;
+      })
+      .catch(() => caches.match(event.request))
   );
 });

@@ -39,6 +39,7 @@ export function updateUserMarker(lat, lng, accuracy) {
       weight: 2,
       fillColor: "#38bdf8",
       fillOpacity: 0.9,
+      interactive: false, // haritadaki noktalara tiklamayi engellemesin
     }).addTo(map);
   } else {
     userMarker.setLatLng([lat, lng]);
@@ -52,6 +53,7 @@ export function updateUserMarker(lat, lng, accuracy) {
         weight: 1,
         fillColor: "#38bdf8",
         fillOpacity: 0.08,
+        interactive: false, // haritadaki noktalara tiklamayi engellemesin
       }).addTo(map);
     } else {
       userAccuracyCircle.setLatLng([lat, lng]);
@@ -68,7 +70,7 @@ export function drawFinishedSegment(segment, color, options = {}) {
   const { onEdgeClick, onVertexClick, pointMarkerColors } = options;
   const existing = segmentLayers.get(segment.id);
   if (existing) map.removeLayer(existing);
-  if (segment.points.length < 2) return;
+  if (segment.points.length < 1) return;
 
   const group = L.layerGroup().addTo(map);
   const points = segment.points;

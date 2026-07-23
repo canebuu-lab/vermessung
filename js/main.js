@@ -235,7 +235,7 @@ function renderSegmentsOnMap() {
   }
   for (const seg of state.segments) {
     if (seg.id === state.currentSegmentId) continue; // aktif kayit live line ile cizilir
-    if (seg.points.length < 2) continue;
+    if (seg.points.length < 1) continue;
     const layer = layersById.get(seg.layerId);
     if (!layer) continue;
     drawFinishedSegment(seg, layer.color, {
@@ -249,7 +249,7 @@ function renderSegmentsOnMap() {
 // ---- ust bilgi / durum ----
 function renderTopStatus() {
   const state = getState();
-  const finished = state.segments.filter((s) => s.points.length >= 2).length;
+  const finished = state.segments.filter((s) => s.points.length >= 1).length;
   const totalPoints = state.segments.reduce((sum, s) => sum + s.points.length, 0);
   statSegments.textContent = String(finished);
   statPoints.textContent = String(totalPoints);
