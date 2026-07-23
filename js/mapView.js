@@ -108,9 +108,18 @@ export function drawFinishedSegment(segment, color, options = {}) {
       });
     }
 
-    // bu noktaya bir "nokta katmani" etiketlenmisse, etrafina ince bir renkli halka ciz
+    // bu noktaya bir "nokta katmani" etiketlenmisse, etrafina renkli bir halka ciz.
+    // Once koyu bir "halo" cizilir ki beyaz/acik renkli halkalar da harita ustunde
+    // (ozellikle acik renkli zeminlerde) gorunur kalsin.
     const ringColor = pointMarkerColors?.get(p.id);
     if (ringColor) {
+      L.circleMarker([p.lat, p.lng], {
+        radius: 13,
+        color: "#000",
+        weight: 5,
+        opacity: 0.55,
+        fill: false,
+      }).addTo(group);
       L.circleMarker([p.lat, p.lng], {
         radius: 12,
         color: ringColor,
