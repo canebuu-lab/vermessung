@@ -234,13 +234,19 @@ hr { border: none; border-top: 1px solid #1f2937; margin: 4px 0; }
   cursor: not-allowed;
 }
 .record-btn.recording {
-  background: #ef4444;
+  background: #16a34a;
   animation: pulse 1.4s infinite;
 }
-.record-btn.recording #recordIcon::before { content: "■"; font-size: 20px; }
-.record-btn:not(.recording) #recordIcon::before { content: "+"; }
+#recordIcon::before { content: "+"; }
 #recordIcon { visibility: hidden; }
 #recordIcon::before { visibility: visible; display: block; }
+
+.finish-btn {
+  padding: 10px 14px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.finish-btn.hidden { display: none; }
 
 @keyframes pulse {
   0% { box-shadow: 0 0 0 4px rgba(239,68,68,0.25); }

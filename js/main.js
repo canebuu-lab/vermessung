@@ -28,6 +28,9 @@ import {
   ACCURACY_WARN_M,
   ACCURACY_BAD_M,
 } from "./gpsRecorder.js";
+
+const SAMPLE_WINDOW_MS = 3000; // nokta eklerken ortalamasi alinacak son okuma penceresi
+const MARKER_SMOOTHING = 0.35; // haritadaki konum noktasi titremesini azaltmak icin (0-1)
 import { downloadDxf } from "./dxfExport.js";
 
 // ---- DOM ----
@@ -55,12 +58,18 @@ const gpsAccuracyText = el("gpsAccuracyText");
 
 const activeLayerTag = el("activeLayerTag");
 const btnRecord = el("btnRecord");
+const btnFinishLine = el("btnFinishLine");
 const recordInfo = el("recordInfo");
 
 // ---- runtime (persist edilmeyen) durum ----
-let isRecording = false;
-let lastPosition = null;
+let lastPosition = null; // en son ham GPS okumasi (marker/durum icin)
+let recentSamples = []; // nokta eklerken ortalama almak icin son okumalar
+let smoothedMarkerPos = null; // haritadaki mavi nokta icin yumusatilmis konum
 let recordDistance = 0;
+
+function isLineInProgress() {
+  return getCurrentSegment() != null;
+}
 
 // ---- harita ----
 initMap();
@@ -131,8 +140,8 @@ function renderLayers() {
     del.title = "Katmani sil";
     del.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (isRecording && getCurrentSegment()?.layerId === layer.id) {
-        alert("Kayit devam ederken bu katman silinemez. Once kaydi durdur.");
+      if (isLineInProgress() && getCurrentSegment()?.layerId === layer.id) {
+        alert("Devam eden cizgi bu katmanda. Once 'Bitir' ile cizgiyi tamamla.");
         return;
       }
       const count = state.segments.filter((s) => s.layerId === layer.id).length;
@@ -144,9 +153,9 @@ function renderLayers() {
     });
 
     item.addEventListener("click", () => {
-      if (isRecording) {
-        alert("Kayit devam ederken katman degistirilemez. Once kaydi durdur.");
-        return;
+      if (layer.id === state.activeLayerId) return;
+      if (isLineInProgress()) {
+        finishCurrentLine();
       }
       setActiveLayer(layer.id);
     });
@@ -181,7 +190,8 @@ function renderTopStatus() {
   statPoints.textContent = String(totalPoints);
 
   const active = getActiveLayer();
-  if (isRecording && active) {
+  const lineActive = isLineInProgress();
+  if (lineActive && active) {
     activeLayerTag.textContent = `● ${active.name}`;
   } else if (active) {
     activeLayerTag.textContent = active.name;
@@ -190,6 +200,8 @@ function renderTopStatus() {
   }
 
   btnRecord.disabled = !active;
+  btnRecord.classList.toggle("recording", lineActive);
+  btnFinishLine.classList.toggle("hidden", !lineActive);
 }
 
 function renderAll() {
@@ -217,7 +229,7 @@ function setGpsStatus(accuracy) {
 
 // ---- kayit bilgisi (nokta sayisi / mesafe) ----
 function renderRecordInfo() {
-  if (!isRecording) {
+  if (!isLineInProgress()) {
     recordInfo.textContent = "";
     return;
   }
@@ -226,26 +238,45 @@ function renderRecordInfo() {
   recordInfo.textContent = `${count} nokta · ${recordDistance.toFixed(1)} m`;
 }
 
-// ---- GPS izleme baslat ----
+// ---- son GPS okumalarinin ortalamasini alarak daha stabil bir nokta uret ----
+function getAveragedPosition() {
+  if (recentSamples.length === 0) return lastPosition;
+  const sum = recentSamples.reduce(
+    (acc, p) => {
+      acc.lat += p.lat;
+      acc.lng += p.lng;
+      acc.accuracy = Math.min(acc.accuracy, p.accuracy ?? Infinity);
+      return acc;
+    },
+    { lat: 0, lng: 0, accuracy: Infinity }
+  );
+  const n = recentSamples.length;
+  return {
+    lat: sum.lat / n,
+    lng: sum.lng / n,
+    alt: recentSamples[recentSamples.length - 1].alt,
+    accuracy: sum.accuracy,
+    t: Date.now(),
+  };
+}
+
+// ---- GPS izleme baslat (harita ustundeki konum + durum gostergesi icin surekli) ----
 startWatch(
   (pos) => {
     setGpsStatus(pos.accuracy);
-    updateUserMarker(pos.lat, pos.lng, pos.accuracy);
-    centerOnUserOnce(pos.lat, pos.lng);
 
-    if (isRecording) {
-      const seg = getCurrentSegment();
-      if (seg) {
-        const last = seg.points[seg.points.length - 1];
-        const dist = last ? haversineMeters(last.lat, last.lng, pos.lat, pos.lng) : Infinity;
-        if (!last || dist >= MIN_POINT_DISTANCE_M) {
-          if (last) recordDistance += dist;
-          appendPoint(seg.id, pos);
-          setLivePoints(seg.points, getActiveLayer()?.color ?? "#ff5722");
-          renderRecordInfo();
-        }
-      }
+    const now = Date.now();
+    recentSamples.push(pos);
+    recentSamples = recentSamples.filter((p) => now - (p.t ?? now) < SAMPLE_WINDOW_MS);
+
+    if (!smoothedMarkerPos) {
+      smoothedMarkerPos = { lat: pos.lat, lng: pos.lng };
+    } else {
+      smoothedMarkerPos.lat += (pos.lat - smoothedMarkerPos.lat) * MARKER_SMOOTHING;
+      smoothedMarkerPos.lng += (pos.lng - smoothedMarkerPos.lng) * MARKER_SMOOTHING;
     }
+    updateUserMarker(smoothedMarkerPos.lat, smoothedMarkerPos.lng, pos.accuracy);
+    centerOnUserOnce(pos.lat, pos.lng);
 
     lastPosition = pos;
   },
@@ -258,39 +289,54 @@ startWatch(
   }
 );
 
-// ---- kayit start/stop ----
+// ---- cizgiyi tamamla ----
+function finishCurrentLine() {
+  const seg = getCurrentSegment();
+  if (!seg) return;
+  clearLive();
+  recordInfo.textContent = "";
+  finishSegment(seg.id);
+  renderTopStatus();
+}
+
+// ---- + : aktif katmana nokta ekle (onceki nokta varsa duz cizgiyle baglar) ----
 btnRecord.addEventListener("click", () => {
   const active = getActiveLayer();
   if (!active) return;
 
-  if (!isRecording) {
-    if (!lastPosition) {
-      alert("GPS konumu henuz alinamadi, birazdan tekrar dene.");
+  const point = getAveragedPosition();
+  if (!point) {
+    alert("GPS konumu henuz alinamadi, birazdan tekrar dene.");
+    return;
+  }
+
+  let seg = getCurrentSegment();
+  if (!seg) {
+    recordDistance = 0;
+    seg = startSegment(active.id);
+  } else {
+    const last = seg.points[seg.points.length - 1];
+    const dist = haversineMeters(last.lat, last.lng, point.lat, point.lng);
+    if (dist < MIN_POINT_DISTANCE_M) {
+      alert("Bu nokta oncekiyle neredeyse ayni yerde, biraz hareket edip tekrar dene.");
       return;
     }
-    isRecording = true;
-    recordDistance = 0;
-    const seg = startSegment(active.id);
-    appendPoint(seg.id, lastPosition);
-    setLivePoints(seg.points, active.color);
-    btnRecord.classList.add("recording");
-    renderRecordInfo();
-    renderTopStatus();
-  } else {
-    const seg = getCurrentSegment();
-    isRecording = false;
-    btnRecord.classList.remove("recording");
-    clearLive();
-    recordInfo.textContent = "";
-    if (seg) finishSegment(seg.id);
-    renderTopStatus();
+    recordDistance += dist;
   }
+
+  appendPoint(seg.id, point);
+  setLivePoints(seg.points, active.color);
+  renderRecordInfo();
+  renderTopStatus();
 });
+
+// ---- Bitir: mevcut cizgiyi kapat, bir sonraki + yeni bir cizgi baslatir ----
+btnFinishLine.addEventListener("click", finishCurrentLine);
 
 // ---- DXF export ----
 btnExportDxf.addEventListener("click", () => {
-  if (isRecording) {
-    alert("Once devam eden kaydi durdur, sonra disa aktar.");
+  if (isLineInProgress()) {
+    alert("Once 'Bitir' ile devam eden cizgiyi tamamla, sonra disa aktar.");
     return;
   }
   const state = getState();
@@ -299,8 +345,8 @@ btnExportDxf.addEventListener("click", () => {
 
 // ---- hepsini sil ----
 btnClearAll.addEventListener("click", () => {
-  if (isRecording) {
-    alert("Once devam eden kaydi durdur.");
+  if (isLineInProgress()) {
+    alert("Once 'Bitir' ile devam eden cizgiyi tamamla.");
     return;
   }
   if (confirm("Tum katmanlar ve olcumler kalici olarak silinecek. Emin misin?")) {
