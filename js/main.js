@@ -44,6 +44,8 @@ const CAPTURE_DURATION_MS = 6000; // nokta eklerken GPS ornegi toplama suresi (d
 const MAX_PLAUSIBLE_SPEED_MPS = 20; // ~72 km/h - bunun uzerindeki ani "sicramalar" GPS hatasi sayilir
 const OUTLIER_CONFIRM_STREAK = 2; // ust uste bu kadar tutarli sicrama gelirse gercek konum degisikligi kabul edilir
 const CAPTURE_OUTLIER_RADIUS_M = 12; // nokta yakalarken medyandan bu kadar uzak orneklerin agirligi dusurulur
+const CAPTURE_HARD_ACCURACY_M = 30; // bu degerden kotu dogruluktaki ornekler ortalamadan tamamen elenir
+const CAPTURE_SANITY_RADIUS_M = 25; // yakalanan nokta, olcume baslarkenki konumdan bu kadar uzaksa onay istenir
 
 // ---- DOM ----
 const el = (id) => document.getElementById(id);
@@ -101,6 +103,7 @@ let captureBuffer = [];
 let lastAcceptedPos = null; // sicrama filtresinin kiyasladigi son guvenilir konum
 let lastRejectedPos = null;
 let rejectedStreak = 0;
+let captureStartRef = null; // "+"a basildigi andaki ekrandaki konum (yakalanan noktanin makul olup olmadigini kiyaslamak icin)
 
 function isLineInProgress() {
   return getCurrentSegment() != null;
@@ -322,10 +325,15 @@ function weightedAveragePosition(samples) {
   if (samples.length === 0) return null;
 
   let usable = samples;
-  if (samples.length >= 3) {
-    const medLat = median(samples.map((p) => p.lat));
-    const medLng = median(samples.map((p) => p.lng));
-    const filtered = samples.filter(
+
+  // once GPS'in kendi bile guvenmedigi (dogrulugu cok kotu) ornekleri tamamen ele
+  const accurate = usable.filter((p) => !p.accuracy || p.accuracy <= CAPTURE_HARD_ACCURACY_M);
+  if (accurate.length > 0) usable = accurate;
+
+  if (usable.length >= 3) {
+    const medLat = median(usable.map((p) => p.lat));
+    const medLng = median(usable.map((p) => p.lng));
+    const filtered = usable.filter(
       (p) => haversineMeters(p.lat, p.lng, medLat, medLng) <= CAPTURE_OUTLIER_RADIUS_M
     );
     if (filtered.length > 0) usable = filtered;
@@ -637,6 +645,11 @@ btnRecord.addEventListener("click", () => {
 
   capturing = true;
   captureBuffer = [];
+  captureStartRef = smoothedMarkerPos
+    ? { lat: smoothedMarkerPos.lat, lng: smoothedMarkerPos.lng }
+    : lastPosition
+    ? { lat: lastPosition.lat, lng: lastPosition.lng }
+    : null;
   recordIcon.textContent = String(Math.ceil(CAPTURE_DURATION_MS / 1000));
   recordInfo.textContent = "Konum olculuyor, sabit dur…";
   renderTopStatus();
@@ -658,6 +671,20 @@ btnRecord.addEventListener("click", () => {
       renderRecordInfo();
       renderTopStatus();
       return;
+    }
+
+    if (captureStartRef) {
+      const jumpDist = haversineMeters(captureStartRef.lat, captureStartRef.lng, point.lat, point.lng);
+      if (jumpDist > CAPTURE_SANITY_RADIUS_M) {
+        const ok = confirm(
+          `GPS konumu, olcume basladigin yerden ~${jumpDist.toFixed(0)} m uzakta cikti. Bu bir GPS hatasi olabilir. Yine de bu nokta eklensin mi?`
+        );
+        if (!ok) {
+          renderRecordInfo();
+          renderTopStatus();
+          return;
+        }
+      }
     }
 
     addCapturedPoint(active, point);
