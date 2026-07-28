@@ -154,7 +154,7 @@ export function setLivePoints(points, color, onVertexClick) {
       color,
       weight: 5,
       opacity: 0.95,
-      dashArray: "1 8",
+      dashArray: "10 6",
       lineCap: "round",
     }).addTo(map);
   } else {
