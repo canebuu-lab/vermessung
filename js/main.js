@@ -40,12 +40,20 @@ import { downloadDxf } from "./dxfExport.js";
 
 const SAMPLE_WINDOW_MS = 3000; // haritadaki konum noktasi icin son okuma penceresi
 const MARKER_SMOOTHING = 0.35; // haritadaki konum noktasi titremesini azaltmak icin (0-1)
-const CAPTURE_DURATION_MS = 6000; // nokta eklerken GPS ornegi toplama suresi (daha stabil nokta icin)
 const MAX_PLAUSIBLE_SPEED_MPS = 20; // ~72 km/h - bunun uzerindeki ani "sicramalar" GPS hatasi sayilir
 const OUTLIER_CONFIRM_STREAK = 2; // ust uste bu kadar tutarli sicrama gelirse gercek konum degisikligi kabul edilir
 const CAPTURE_OUTLIER_RADIUS_M = 12; // nokta yakalarken medyandan bu kadar uzak orneklerin agirligi dusurulur
 const CAPTURE_HARD_ACCURACY_M = 30; // bu degerden kotu dogruluktaki ornekler ortalamadan tamamen elenir
 const CAPTURE_SANITY_RADIUS_M = 25; // yakalanan nokta, olcume baslarkenki konumdan bu kadar uzaksa onay istenir
+
+// ---- adaptif nokta yakalama: sabit sure yerine GPS gercekten "yakinsayana" kadar ornek toplanir ----
+// (ArcGIS Survey123 gibi profesyonel olcum uygulamalarinin kullandigi "dogruluk esigi + ortalama" yontemi)
+const CAPTURE_MIN_DURATION_MS = 3000; // her zaman en az bu kadar ornek toplanir
+const CAPTURE_MAX_DURATION_MS = 20000; // GPS bir turlu iyilesmezse bu sureden sonra elimizdekiyle devam edilir
+const CAPTURE_GOOD_ACCURACY_M = 6; // bu dogruluktaki ardisik ornekler "yakinsadi" sayilir
+const CAPTURE_CONVERGE_SPREAD_M = 3; // yakinsama icin son iyi orneklerin birbirine olan azami mesafesi
+const CAPTURE_CONVERGE_STREAK = 4; // erken bitirmek icin gereken ardisik iyi (ve birbirine yakin) ornek sayisi
+const CAPTURE_TICK_MS = 500; // yakinsama kontrolu / canli dogruluk gostergesi guncelleme araligi
 
 // ---- DOM ----
 const el = (id) => document.getElementById(id);
@@ -636,8 +644,62 @@ function addCapturedPoint(active, point) {
   renderRecordInfo();
 }
 
-let captureCountdownTimer = null;
-let captureFinishTimer = null;
+let captureTicker = null;
+let captureStartTime = 0;
+
+// ---- son N ornegin birbirine olan azami (ikili) mesafesi: kumenin ne kadar "toplandigini" olcer ----
+function maxPairwiseDistance(points) {
+  let max = 0;
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const d = haversineMeters(points[i].lat, points[i].lng, points[j].lat, points[j].lng);
+      if (d > max) max = d;
+    }
+  }
+  return max;
+}
+
+// ---- GPS "yakinsadi" mi: son birkac ornek hem dogru hem de birbirine yakin mi ----
+function captureHasConverged() {
+  if (captureBuffer.length < CAPTURE_CONVERGE_STREAK) return false;
+  const recent = captureBuffer.slice(-CAPTURE_CONVERGE_STREAK);
+  const allAccurate = recent.every((p) => p.accuracy != null && p.accuracy <= CAPTURE_GOOD_ACCURACY_M);
+  if (!allAccurate) return false;
+  return maxPairwiseDistance(recent) <= CAPTURE_CONVERGE_SPREAD_M;
+}
+
+// ---- yakalamayi bitir: ortalama al, sicrama kontrolu yap, noktayi ekle ----
+function finishCapture(active) {
+  clearInterval(captureTicker);
+  captureTicker = null;
+  capturing = false;
+  recordIcon.textContent = "+";
+
+  const point = weightedAveragePosition(captureBuffer.length > 0 ? captureBuffer : lastPosition ? [lastPosition] : []);
+  if (!point) {
+    alert("GPS konumu alinamadi, tekrar dene.");
+    renderRecordInfo();
+    renderTopStatus();
+    return;
+  }
+
+  if (captureStartRef) {
+    const jumpDist = haversineMeters(captureStartRef.lat, captureStartRef.lng, point.lat, point.lng);
+    if (jumpDist > CAPTURE_SANITY_RADIUS_M) {
+      const ok = confirm(
+        `GPS konumu, olcume basladigin yerden ~${jumpDist.toFixed(0)} m uzakta cikti. Bu bir GPS hatasi olabilir. Yine de bu nokta eklensin mi?`
+      );
+      if (!ok) {
+        renderRecordInfo();
+        renderTopStatus();
+        return;
+      }
+    }
+  }
+
+  addCapturedPoint(active, point);
+  renderTopStatus();
+}
 
 btnRecord.addEventListener("click", () => {
   const active = getActiveLayer();
@@ -645,51 +707,32 @@ btnRecord.addEventListener("click", () => {
 
   capturing = true;
   captureBuffer = [];
+  captureStartTime = Date.now();
   captureStartRef = smoothedMarkerPos
     ? { lat: smoothedMarkerPos.lat, lng: smoothedMarkerPos.lng }
     : lastPosition
     ? { lat: lastPosition.lat, lng: lastPosition.lng }
     : null;
-  recordIcon.textContent = String(Math.ceil(CAPTURE_DURATION_MS / 1000));
-  recordInfo.textContent = "Konum olculuyor, sabit dur…";
+  recordIcon.textContent = "0";
+  recordInfo.textContent = "Konum ölçülüyor, sabit dur…";
   renderTopStatus();
 
-  let remainingSec = Math.ceil(CAPTURE_DURATION_MS / 1000);
-  captureCountdownTimer = setInterval(() => {
-    remainingSec -= 1;
-    if (remainingSec > 0) recordIcon.textContent = String(remainingSec);
-  }, 1000);
+  captureTicker = setInterval(() => {
+    const elapsed = Date.now() - captureStartTime;
+    recordIcon.textContent = String(Math.min(99, Math.ceil(elapsed / 1000)));
 
-  captureFinishTimer = setTimeout(() => {
-    clearInterval(captureCountdownTimer);
-    capturing = false;
-    recordIcon.textContent = "+";
+    const latest = captureBuffer[captureBuffer.length - 1];
+    const accText = latest?.accuracy != null ? `±${latest.accuracy.toFixed(1)} m` : "…";
+    recordInfo.textContent = `Konum ölçülüyor (${accText}), sabit dur…`;
 
-    const point = weightedAveragePosition(captureBuffer.length > 0 ? captureBuffer : lastPosition ? [lastPosition] : []);
-    if (!point) {
-      alert("GPS konumu alinamadi, tekrar dene.");
-      renderRecordInfo();
-      renderTopStatus();
+    if (elapsed >= CAPTURE_MIN_DURATION_MS && captureHasConverged()) {
+      finishCapture(active);
       return;
     }
-
-    if (captureStartRef) {
-      const jumpDist = haversineMeters(captureStartRef.lat, captureStartRef.lng, point.lat, point.lng);
-      if (jumpDist > CAPTURE_SANITY_RADIUS_M) {
-        const ok = confirm(
-          `GPS konumu, olcume basladigin yerden ~${jumpDist.toFixed(0)} m uzakta cikti. Bu bir GPS hatasi olabilir. Yine de bu nokta eklensin mi?`
-        );
-        if (!ok) {
-          renderRecordInfo();
-          renderTopStatus();
-          return;
-        }
-      }
+    if (elapsed >= CAPTURE_MAX_DURATION_MS) {
+      finishCapture(active);
     }
-
-    addCapturedPoint(active, point);
-    renderTopStatus();
-  }, CAPTURE_DURATION_MS);
+  }, CAPTURE_TICK_MS);
 });
 
 // ---- Bitir ve Kaydet: mevcut cizgiyi kapatir (veri zaten surekli localStorage'a yazilir) ----
