@@ -27,19 +27,24 @@ Acilan pencerede kaynak ve hedef klasoru "Gözat…" ile secin, isterseniz
 "kopyalamak yerine tasi" kutusunu isaretleyin ve "Başlat"a basin. Ilerleme
 cubugu ve canli gunluk pencerede gorunur; bitince ozet mesaji cikar.
 
-### Windows icin tek .exe olarak paketleme (opsiyonel)
+### Windows icin tek .exe olarak paketleme
 
-Kullanicinin Python kurmasina gerek kalmadan calistirabilmesi icin,
-Windows'ta (bu depoyu Windows'a kopyaladiktan sonra) su komutla tek dosyalik
-bir uygulama olusturabilirsiniz:
+.exe dosyasi sadece Windows uzerinde, Windows'ta uretilebilir (bu depo bir
+Linux ortaminda hazirlandigi icin .exe burada olusturulamiyor). Kendi
+bilgisayarinizda 3 adimda hazirlayabilirsiniz:
 
-```
-pip install pyinstaller
-pyinstaller --onefile --windowed --name SokakGPSAyirici gui.py
-```
+1. Python kurun (yoksa): https://www.python.org/downloads/ — kurulumda
+   **"Add python.exe to PATH"** kutusunu mutlaka isaretleyin.
+2. Tesseract OCR kurun: https://github.com/UB-Mannheim/tesseract/wiki
+   (kurulum sirasinda "Additional language data" listesinden **German**'i de
+   secin).
+3. Bu klasoru (`tools/gps_ocr_sort`) bilgisayariniza indirip icine girin,
+   `build_exe.bat` dosyasina **cift tiklayin**. Islem bitince
+   `dist\SokakGPSAyirici.exe` dosyasi hazir olur — bunu masaustune veya
+   istediginiz yere kopyalayip cift tiklayarak calistirabilirsiniz.
 
-Olusan `dist/SokakGPSAyirici.exe` dosyasi paylaşilabilir. Tesseract OCR yine
-de hedef bilgisayarda ayrica kurulu olmalidir (yukaridaki 1. adim).
+Not: `.exe` sadece programin kendisini paketler; Tesseract OCR yine de
+hedef bilgisayarda 2. adimdaki gibi ayrica kurulu olmalidir.
 
 ## Komut satiri (CLI) kullanimi
 
