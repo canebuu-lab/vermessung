@@ -154,6 +154,14 @@ def ocr_image(img: Image.Image, lang: str) -> str:
     return pytesseract.image_to_string(img, lang=lang, config="--psm 6")
 
 
+# OCR icin kirpilan bolgenin buyutulmus genisligi bu degeri gecmez. Telefonla
+# cekilen gercek fotograflar (orn. 2340x4160) test gorseline gore cok daha
+# yuksek cozunurluklu oldugundan, sabit 2x buyutme devasa goruntuler
+# uretip OCR'i ciddi yavaslatiyordu; OCR dogrulugu icin gereken cozunurluk
+# zaten asilmis oluyor, bu yuzden buyutme faktoru genislige gore sinirlandirilir.
+MAX_CROP_WIDTH = 2600
+
+
 def preprocess_crop(img: Image.Image, bottom_fraction: float, left_fraction: float = 0.0) -> Image.Image:
     """Overlay yazisi genelde fotografin alt bandinda olur; o bolgeyi kirpip buyutur.
 
@@ -163,8 +171,9 @@ def preprocess_crop(img: Image.Image, bottom_fraction: float, left_fraction: flo
     top = int(h * (1 - bottom_fraction))
     left = int(w * left_fraction)
     crop = img.crop((left, top, w, h)).convert("L")
-    scale = 2
-    crop = crop.resize((crop.width * scale, crop.height * scale), Image.LANCZOS)
+    scale = min(2.0, MAX_CROP_WIDTH / crop.width) if crop.width else 2.0
+    scale = max(scale, 1.0)
+    crop = crop.resize((int(crop.width * scale), int(crop.height * scale)), Image.LANCZOS)
     return crop
 
 
