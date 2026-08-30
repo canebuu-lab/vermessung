@@ -43,6 +43,7 @@ os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 UNPROCESSED_FOLDER = "Bulunamayanlar"
 REVIEW_FOLDER = "Sokak_Kontrolu_Gerekli"
+DUPLICATE_FOLDER = "Tekrarlananlar"
 
 # Kullanicinin elle sectigi tesseract.exe konumu burada saklanir, bir dahaki
 # acilista tekrar sormamak icin.
@@ -499,12 +500,23 @@ def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, 
             key = dedupe_key(result)
             duplicate_of = seen_keys.get(key)
             if duplicate_of is not None:
-                status = f"ATLANDI: '{duplicate_of}' ile ayni fotograf (koordinat+saat ayni)"
-                street_folder = "(atlandi - tekrar)"
+                status = f"ATLANDI (tekrar): '{duplicate_of}' ile ayni fotograf (koordinat+saat ayni)"
+                street_folder = DUPLICATE_FOLDER
                 dup_count += 1
+                written_path = None
+                try:
+                    dest_path = unique_dest(dest_dir / DUPLICATE_FOLDER / path.name)
+                    written_path = save_with_gps(path, dest_path, result.lat, result.lon)
+                except Exception as exc:
+                    status = f"HATA: tekrar kopyalanamadi: {exc}"
+                if move and written_path is not None:
+                    try:
+                        path.unlink()
+                    except Exception:
+                        pass
                 log_rows.append({
                     "dosya": str(path), "durum": status, "lat": result.lat, "long": result.lon,
-                    "sokak": result.street or "", "hedef": "",
+                    "sokak": result.street or "", "hedef": str(written_path) if written_path else "",
                 })
                 log(f"[{i}/{total}] {path.name} -> {street_folder} ({status})")
                 continue
@@ -557,7 +569,7 @@ def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, 
 
     log(f"\nBitti: {ok_count}/{total} fotograf basariyla GPS'lendi ve klasorlendi.")
     if dup_count:
-        log(f"{dup_count} fotograf, ayni koordinat/saate sahip baska bir fotografla ayni oldugu icin atlandi.")
+        log(f"{dup_count} fotograf, ayni koordinat/saate sahip baska bir fotografla ayni oldugu icin '{DUPLICATE_FOLDER}' klasorune tasindi (islenmedi, silinmedi).")
     log(f"Log dosyasi: {log_path}")
     log(f"OCR/koordinat bulunamayan (veya konumu anormal) fotograflar '{UNPROCESSED_FOLDER}' klasorunde.")
     log(f"Sokak adindan emin olunamayan (ama GPS'i dogru yazilan) fotograflar '{REVIEW_FOLDER}' klasorunde.")
