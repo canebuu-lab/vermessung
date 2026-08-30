@@ -11,7 +11,9 @@ Ne yapar:
     - Koordinati fotografin EXIF GPS alanina yazar (PNG dosyalar JPEG'e cevrilir,
       cunku PNG standart EXIF desteklemez).
     - Sonucu hedef klasor altinda <Sokak Adi>/dosya.jpg olarak kopyalar.
-    - OCR/koordinat bulunamayan dosyalar "Islenemedi" klasorune kopyalanir.
+    - OCR/koordinat bulunamayan dosyalar "Bulunamayanlar" klasorune kopyalanir.
+    - Ayni fotografin (koordinat + saat birebir ayni) tekrarlarini atlar, sadece
+      birini isler.
     - Islem sonunda hedef klasore "islem_log.csv" yazilir (kontrol icin).
 """
 
@@ -30,7 +32,11 @@ import pytesseract
 import piexif
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
-UNPROCESSED_FOLDER = "Islenemedi"
+UNPROCESSED_FOLDER = "Bulunamayanlar"
+
+# Tarih/saat satirini yakalar, orn. "20/06/2026 12:09 PM" (haftanin gunu farkli
+# dilde/alfabede basildigindan - orn. Kiril - onu yoksayip sadece tarih+saati alir).
+DATETIME_RE = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4})[,\s]+(\d{1,2}:\d{2})\s*([AaPp][Mm])?")
 
 # OCR genelde "Lat" kelimesini yanlis okur (orn. "tat", "Iat"), ama "Long" daha
 # guvenilir cikiyor; bu yuzden asil ayirt edici çapa "Long" ve iki ondalikli sayidir.
@@ -67,11 +73,20 @@ def find_latlong(text: str, pattern=LATLONG_STRICT_RE):
     return None
 
 
+def extract_datetime(text: str) -> Optional[str]:
+    match = DATETIME_RE.search(text)
+    if not match:
+        return None
+    date_part, time_part, ampm = match.groups()
+    return f"{date_part} {time_part} {ampm or ''}".strip()
+
+
 @dataclass
 class ExtractResult:
     lat: Optional[float] = None
     lon: Optional[float] = None
     street: Optional[str] = None
+    dt: Optional[str] = None
     raw_text: str = ""
     error: Optional[str] = None
 
@@ -158,7 +173,8 @@ def extract_info(image_path: Path, lang: str) -> ExtractResult:
         lines = [ln.strip() for ln in text.splitlines()]
         lat_idx = next((i for i, ln in enumerate(lines) if find_latlong(ln, pattern)), None)
         street = extract_street_from_lines(lines, lat_idx) if lat_idx is not None else None
-        return ExtractResult(lat=lat, lon=lon, street=street, raw_text=text)
+        dt = extract_datetime(text)
+        return ExtractResult(lat=lat, lon=lon, street=street, dt=dt, raw_text=text)
 
     # Harita sutunu disarida birakilan denemeler (LEFT_FRACTIONS sirasi) once
     # denenir, cunku adres satirina daha temiz sonuc verir. "Lat ... Long ..."
@@ -283,24 +299,55 @@ def unique_dest(dest_path: Path) -> Path:
         i += 1
 
 
-def process(source_dir: Path, dest_dir: Path, lang: str, move: bool):
+def dedupe_key(result: ExtractResult):
+    """Ayni fotografin (kopya/tekrar) tekrarlarini yakalamak icin anahtar uretir.
+
+    Koordinat 6 hane (~11 cm) hassasiyetinde ve OCR'dan okunan tarih/saat
+    birebir ayniysa, ayni fotografin tekrari kabul edilir.
+    """
+    lat_key = round(result.lat, 6)
+    lon_key = round(result.lon, 6)
+    return (lat_key, lon_key, result.dt)
+
+
+def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, on_progress=None):
     dest_dir.mkdir(parents=True, exist_ok=True)
     log_rows = []
     files = list(iter_image_files(source_dir))
     total = len(files)
     if total == 0:
-        print(f"Kaynak klasorde islenecek fotograf bulunamadi: {source_dir}")
+        log(f"Kaynak klasorde islenecek fotograf bulunamadi: {source_dir}")
         return
 
-    print(f"{total} fotograf bulundu. Isleniyor...")
+    log(f"{total} fotograf bulundu. Isleniyor...")
     ok_count = 0
+    dup_count = 0
+    seen_keys = {}
     for i, path in enumerate(files, 1):
         result = extract_info(path, lang)
         status = "OK"
         street_folder = UNPROCESSED_FOLDER
         written_path = None
+        has_coords = not result.error and result.lat is not None and result.lon is not None
 
-        if result.error or result.lat is None or result.lon is None:
+        if has_coords:
+            key = dedupe_key(result)
+            duplicate_of = seen_keys.get(key)
+            if duplicate_of is not None:
+                status = f"ATLANDI: '{duplicate_of}' ile ayni fotograf (koordinat+saat ayni)"
+                street_folder = "(atlandi - tekrar)"
+                dup_count += 1
+                log_rows.append({
+                    "dosya": str(path), "durum": status, "lat": result.lat, "long": result.lon,
+                    "sokak": result.street or "", "hedef": "",
+                })
+                if on_progress:
+                    on_progress(i, total)
+                log(f"[{i}/{total}] {path.name} -> {street_folder} ({status})")
+                continue
+            seen_keys[key] = path.name
+
+        if not has_coords:
             status = f"HATA: {result.error or 'koordinat bulunamadi'}"
         else:
             street_folder = sanitize_folder_name(result.street) if result.street else "Sokak_Bulunamadi"
@@ -335,7 +382,9 @@ def process(source_dir: Path, dest_dir: Path, lang: str, move: bool):
             "sokak": result.street or "",
             "hedef": str(written_path) if written_path else "",
         })
-        print(f"[{i}/{total}] {path.name} -> {street_folder} ({status})")
+        if on_progress:
+            on_progress(i, total)
+        log(f"[{i}/{total}] {path.name} -> {street_folder} ({status})")
 
     log_path = dest_dir / "islem_log.csv"
     with open(log_path, "w", newline="", encoding="utf-8-sig") as f:
@@ -343,9 +392,11 @@ def process(source_dir: Path, dest_dir: Path, lang: str, move: bool):
         writer.writeheader()
         writer.writerows(log_rows)
 
-    print(f"\nBitti: {ok_count}/{total} fotograf basariyla GPS'lendi ve klasorlendi.")
-    print(f"Log dosyasi: {log_path}")
-    print(f"OCR/koordinat bulunamayan fotograflar '{UNPROCESSED_FOLDER}' klasorunde.")
+    log(f"\nBitti: {ok_count}/{total} fotograf basariyla GPS'lendi ve klasorlendi.")
+    if dup_count:
+        log(f"{dup_count} fotograf, ayni koordinat/saate sahip baska bir fotografla ayni oldugu icin atlandi.")
+    log(f"Log dosyasi: {log_path}")
+    log(f"OCR/koordinat bulunamayan fotograflar '{UNPROCESSED_FOLDER}' klasorunde.")
 
 
 def main():
