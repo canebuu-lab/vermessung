@@ -32,6 +32,14 @@ from PIL import Image
 import pytesseract
 import piexif
 
+# Tesseract, tek bir cagrida bile OpenMP ile birden fazla is parcacigi
+# kullanir. Biz paralel (thread havuzu ile ayni anda birden fazla fotografta)
+# OCR calistirdigimizdan, tesseract'in kendi ic paralelligini kapatiyoruz
+# (tek cagri = tek thread); yoksa N paralel fotograf x tesseract'in kendi
+# ic threadleri, cekirdek sayisini kat kat asip islemciyi tikayarak islemi
+# sirali calismadan bile yavaslatir.
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 UNPROCESSED_FOLDER = "Bulunamayanlar"
 
@@ -359,6 +367,37 @@ def dedupe_key(result: ExtractResult):
     return (lat_key, lon_key, result.dt)
 
 
+def run_ocr_parallel(files, lang: str, log=print, on_progress=None, max_workers=None):
+    """Tum fotograflar icin OCR'i (extract_info) paralel calistirir.
+
+    OCR'in agir kismi (tesseract) ayri bir isletim sistemi surecinde
+    calistigi icin (pytesseract subprocess acar), Python'un GIL'i engel
+    olmaz ve thread havuzu ile gercek paralellik saglanir. Bu, tek tek
+    sirayla islemeye gore cok cekirdekli bilgisayarlarda birkaç kat hizlanma
+    saglar.
+    """
+    import concurrent.futures
+
+    total = len(files)
+    results = [None] * total
+    if max_workers is None:
+        max_workers = os.cpu_count() or 4
+
+    completed = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {executor.submit(extract_info, path, lang): idx for idx, path in enumerate(files)}
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                results[idx] = future.result()
+            except Exception as exc:
+                results[idx] = ExtractResult(error=f"Beklenmeyen hata: {exc}")
+            completed += 1
+            if on_progress:
+                on_progress(completed, total)
+    return results
+
+
 def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, on_progress=None):
     dest_dir.mkdir(parents=True, exist_ok=True)
     log_rows = []
@@ -368,12 +407,16 @@ def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, 
         log(f"Kaynak klasorde islenecek fotograf bulunamadi: {source_dir}")
         return
 
-    log(f"{total} fotograf bulundu. Isleniyor...")
+    workers = os.cpu_count() or 4
+    log(f"{total} fotograf bulundu. OCR isleniyor ({workers} paralel islem)...")
+    results = run_ocr_parallel(files, lang, log=log, on_progress=on_progress)
+
+    log("OCR tamamlandi, sonuclar klasorlere yerlestiriliyor...")
     ok_count = 0
     dup_count = 0
     seen_keys = {}
     for i, path in enumerate(files, 1):
-        result = extract_info(path, lang)
+        result = results[i - 1]
         status = "OK"
         street_folder = UNPROCESSED_FOLDER
         written_path = None
@@ -390,8 +433,6 @@ def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, 
                     "dosya": str(path), "durum": status, "lat": result.lat, "long": result.lon,
                     "sokak": result.street or "", "hedef": "",
                 })
-                if on_progress:
-                    on_progress(i, total)
                 log(f"[{i}/{total}] {path.name} -> {street_folder} ({status})")
                 continue
             seen_keys[key] = path.name
@@ -431,8 +472,6 @@ def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, 
             "sokak": result.street or "",
             "hedef": str(written_path) if written_path else "",
         })
-        if on_progress:
-            on_progress(i, total)
         log(f"[{i}/{total}] {path.name} -> {street_folder} ({status})")
 
     log_path = dest_dir / "islem_log.csv"
