@@ -42,6 +42,7 @@ os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 UNPROCESSED_FOLDER = "Bulunamayanlar"
+REVIEW_FOLDER = "Sokak_Kontrolu_Gerekli"
 
 # Kullanicinin elle sectigi tesseract.exe konumu burada saklanir, bir dahaki
 # acilista tekrar sormamak icin.
@@ -143,6 +144,7 @@ class ExtractResult:
     lat: Optional[float] = None
     lon: Optional[float] = None
     street: Optional[str] = None
+    street_confident: bool = False
     dt: Optional[str] = None
     raw_text: str = ""
     error: Optional[str] = None
@@ -217,6 +219,33 @@ def extract_street_from_lines(lines: list[str], lat_idx: int) -> Optional[str]:
     return first_part
 
 
+# Iki OCR denemesinin "ayni koordinatta hemfikir" sayilmasi icin izin verilen
+# en buyuk fark (derece). ~0.0003 derece ~= 30 metre; gercek tek-hane OCR
+# hatalari (orn. "51" -> "54") bunun onlarca-yuzlerce kati kadar sapma
+# yarattigindan kolayca ayirt edilir, ama farkli kirpmalardaki kucuk
+# yuvarlama farklarina tolerans taniniz.
+COORD_CONFIRM_TOL = 0.0003
+
+
+def find_confirmed_match(matches: list) -> Optional["ExtractResult"]:
+    """Birbiriyle 'hemfikir' olan (COORD_CONFIRM_TOL icinde) ilk iki sonucu bulur.
+
+    Tek bir OCR okumasi asla tek basina yeterli sayilmaz: koordinat, en az iki
+    bagimsiz denemede (farkli kirpma/olcek) ayni cikmadikca guvenilir kabul
+    edilmez. Bu, tek bir hanenin yanlis okunmasindan (orn. "51" -> "54")
+    kaynaklanan, sayisal olarak "gecerli" ama gercekte yanlis konumlarin
+    GPS'e yazilmasini engeller.
+    """
+    for i in range(len(matches)):
+        for j in range(i + 1, len(matches)):
+            a, b = matches[i], matches[j]
+            if abs(a.lat - b.lat) <= COORD_CONFIRM_TOL and abs(a.lon - b.lon) <= COORD_CONFIRM_TOL:
+                if b.street_confident and not a.street_confident:
+                    return b
+                return a
+    return None
+
+
 def extract_info(image_path: Path, lang: str) -> ExtractResult:
     try:
         img = Image.open(image_path)
@@ -230,18 +259,17 @@ def extract_info(image_path: Path, lang: str) -> ExtractResult:
         lines = [ln.strip() for ln in text.splitlines()]
         lat_idx = next((i for i, ln in enumerate(lines) if find_latlong(ln, pattern)), None)
         street = extract_street_from_lines(lines, lat_idx) if lat_idx is not None else None
-        dt = extract_datetime(text)
-        return ExtractResult(lat=lat, lon=lon, street=street, dt=dt, raw_text=text)
+        result = ExtractResult(lat=lat, lon=lon, street=street, dt=extract_datetime(text), raw_text=text)
+        if looks_like_street(result.street):
+            result.street_confident = True
+        return result
 
     # Harita sutunu disarida birakilan denemeler (LEFT_FRACTIONS sirasi) once
-    # denenir, cunku adres satirina daha temiz sonuc verir. "Lat ... Long ..."
-    # kaliplarindan acikca eslesen (STRICT) ve sokak adi makul gorunen ilk sonuc
-    # bulununca hemen durulur; boylece cogu fotografta gereksiz OCR denemesi
-    # yapilmaz. Koordinat doğru ama sokak adi gurultuluyse (kucuk/erken bir
-    # kirpmadan geldiyse) sonuc yedek olarak saklanir ve aramaya devam edilir;
-    # daha buyuk/temiz bir kirpmadan iyi bir sokak adi gelirse o tercih edilir.
-    texts = []
-    fallback: Optional[ExtractResult] = None
+    # denenir, cunku adres satirina daha temiz sonuc verir. Bir koordinat,
+    # ancak en az iki bagimsiz kirpma/olcek denemesi ayni sonucu verdiginde
+    # ("hemfikir" oldugunda) guvenilir sayilir; bu yuzden ilk basarili
+    # okumada hemen durulmaz, teyit icin en az bir tane daha aranir.
+    strict_matches: list = []
     for left_fraction in LEFT_FRACTIONS:
         for bottom_fraction in CROP_FRACTIONS:
             try:
@@ -252,27 +280,19 @@ def extract_info(image_path: Path, lang: str) -> ExtractResult:
                 text = ocr_image(source, lang)
             except Exception as exc:
                 return ExtractResult(error=f"OCR hatasi: {exc}")
-            texts.append(text)
             if find_latlong(text, LATLONG_STRICT_RE):
-                result = make_result(text, LATLONG_STRICT_RE)
-                if looks_like_street(result.street):
-                    return result
-                fallback = result
+                strict_matches.append(make_result(text, LATLONG_STRICT_RE))
+                confirmed = find_confirmed_match(strict_matches)
+                if confirmed:
+                    return confirmed
 
-    # Kesin kalip hicbir denemede iyi bir sokak adi vermediyse, gevsek kalibi
-    # (sadece "Long" + iki sayi) daha once hesaplanmis metinler uzerinde dene.
-    if fallback is None:
-        for text in texts:
-            if find_latlong(text, LATLONG_LOOSE_RE):
-                result = make_result(text, LATLONG_LOOSE_RE)
-                if looks_like_street(result.street):
-                    return result
-                fallback = fallback or result
+    confirmed = find_confirmed_match(strict_matches)
+    if confirmed:
+        return confirmed
 
-    if fallback is not None:
-        return fallback
-
-    return ExtractResult(error="Lat/Long OCR ile bulunamadi", raw_text=texts[-1] if texts else "")
+    return ExtractResult(
+        error="Koordinat guvenilir sekilde teyit edilemedi (tek okuma, ikinci bir denemeyle dogrulanamadi)"
+    )
 
 
 def _apply_exif_orientation(img: Image.Image) -> Image.Image:
@@ -398,6 +418,29 @@ def run_ocr_parallel(files, lang: str, log=print, on_progress=None, max_workers=
     return results
 
 
+def find_coordinate_outliers(results, min_points=5, threshold_deg=0.02):
+    """Diger fotograflara gore anormal uzaktaki koordinatlari isaretler.
+
+    Ayni saha gezisindeki fotograflar genelde birbirine yakin (bir mahalle/
+    birkac sokak) cikar. OCR bazen bir hane yanlis okuyup (orn. "51" yerine
+    "54") koordinati onlarca-yuzlerce km kaydırabiliyor; bu, sayisal olarak
+    gecerli (-90..90 / -180..180) oldugu icin normal dogrulamadan gecer ama
+    gercekte yanlis konumdur. Bu fonksiyon, medyan konumdan asiri sapan
+    (varsayilan 0.02 derece, ~2 km) sonuclarin indekslerini dondurur.
+    """
+    import statistics
+
+    coords = [(i, r) for i, r in enumerate(results) if r and r.lat is not None and r.lon is not None]
+    if len(coords) < min_points:
+        return set()
+    median_lat = statistics.median(r.lat for _, r in coords)
+    median_lon = statistics.median(r.lon for _, r in coords)
+    return {
+        i for i, r in coords
+        if abs(r.lat - median_lat) > threshold_deg or abs(r.lon - median_lon) > threshold_deg
+    }
+
+
 def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, on_progress=None):
     dest_dir.mkdir(parents=True, exist_ok=True)
     log_rows = []
@@ -410,6 +453,9 @@ def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, 
     workers = os.cpu_count() or 4
     log(f"{total} fotograf bulundu. OCR isleniyor ({workers} paralel islem)...")
     results = run_ocr_parallel(files, lang, log=log, on_progress=on_progress)
+    outlier_indices = find_coordinate_outliers(results)
+    if outlier_indices:
+        log(f"UYARI: {len(outlier_indices)} fotografin koordinati digerlerinden anormal uzak (muhtemel OCR hatasi), '{UNPROCESSED_FOLDER}' klasorune ayriliyor.")
 
     log("OCR tamamlandi, sonuclar klasorlere yerlestiriliyor...")
     ok_count = 0
@@ -420,7 +466,8 @@ def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, 
         status = "OK"
         street_folder = UNPROCESSED_FOLDER
         written_path = None
-        has_coords = not result.error and result.lat is not None and result.lon is not None
+        is_outlier = (i - 1) in outlier_indices
+        has_coords = not result.error and result.lat is not None and result.lon is not None and not is_outlier
 
         if has_coords:
             key = dedupe_key(result)
@@ -437,10 +484,12 @@ def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, 
                 continue
             seen_keys[key] = path.name
 
-        if not has_coords:
+        if is_outlier:
+            status = "HATA: Koordinat anormal uzak (muhtemel OCR hatasi), kontrol edin"
+        elif not has_coords:
             status = f"HATA: {result.error or 'koordinat bulunamadi'}"
         else:
-            street_folder = sanitize_folder_name(result.street) if result.street else "Sokak_Bulunamadi"
+            street_folder = sanitize_folder_name(result.street) if result.street_confident else REVIEW_FOLDER
             try:
                 dest_path = unique_dest(dest_dir / street_folder / path.name)
                 written_path = save_with_gps(path, dest_path, result.lat, result.lon)
@@ -484,7 +533,8 @@ def process(source_dir: Path, dest_dir: Path, lang: str, move: bool, log=print, 
     if dup_count:
         log(f"{dup_count} fotograf, ayni koordinat/saate sahip baska bir fotografla ayni oldugu icin atlandi.")
     log(f"Log dosyasi: {log_path}")
-    log(f"OCR/koordinat bulunamayan fotograflar '{UNPROCESSED_FOLDER}' klasorunde.")
+    log(f"OCR/koordinat bulunamayan (veya konumu anormal) fotograflar '{UNPROCESSED_FOLDER}' klasorunde.")
+    log(f"Sokak adindan emin olunamayan (ama GPS'i dogru yazilan) fotograflar '{REVIEW_FOLDER}' klasorunde.")
 
 
 def main():
