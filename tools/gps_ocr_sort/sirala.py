@@ -183,17 +183,31 @@ def looks_like_street(name: Optional[str]) -> bool:
     calisan kaba bir makul-mu kontrolu."""
     if not name or len(name) < 3:
         return False
-    if any(ch.isdigit() for ch in name):
+    # Kisa ev numaralarina (orn. "Reimelsweg 12", "Uerdinger Str. 150", "147C")
+    # izin ver, ama posta kodu gibi 5+ haneli sayilari reddet (adres satirinin
+    # yanlis kismini yakalamis olabilir).
+    if re.search(r"\d{5,}", name):
         return False
-    compact = name.replace(" ", "").replace("-", "")
+    lname = name.lower().strip()
+    # "Germany"/"German" ulke adi sokak alanina sizmissa (OCR adres satirini
+    # kaybedip bir alt/ust satiri yakalamis demektir) - hicbir zaman gercek
+    # sokak adi degildir.
+    if re.match(r"^(ge?rman(y)?|rmany)\b", lname):
+        return False
+    # Harf orani hesaplanirken rakamlar sayilmaz (kisa ev numaralari orani
+    # haksiz yere dusurmesin diye); sadece harf-disi/rakam-disi gurultu
+    # (@, ;, —, © gibi) orani dusurur.
+    compact = "".join(ch for ch in name.replace(" ", "").replace("-", "") if not ch.isdigit())
     if not compact:
         return False
     letters = sum(ch.isalpha() for ch in compact)
     if letters / len(compact) < 0.85:
         return False
     words = name.split()
-    short_caps = sum(1 for w in words if len(w) <= 2 and w.isupper())
-    if short_caps >= 2:
+    if len(words) > 5:
+        return False
+    short_words = sum(1 for w in words if len(w) <= 2)
+    if short_words >= 2:
         return False
     return True
 
