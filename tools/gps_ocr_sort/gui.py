@@ -84,6 +84,34 @@ class App(tk.Tk):
         if path:
             self.dest_var.set(path)
 
+    def _prompt_manual_tesseract(self) -> bool:
+        """Tesseract otomatik bulunamadiginda, kullaniciya tesseract.exe'yi elle
+        secme secenegi sunar. Basariliysa True doner ve konumu bir dahaki
+        acilista tekrar sormamak icin kaydeder."""
+        if not messagebox.askyesno(
+            "Tesseract bulunamadı",
+            "Tesseract OCR otomatik olarak bulunamadı.\n\n"
+            "Eğer Tesseract'ı kurduysanız, tesseract.exe dosyasının konumunu "
+            "elle seçmek ister misiniz?\n\n"
+            "(Kurmadıysanız 'Hayır'a basıp önce "
+            "https://github.com/UB-Mannheim/tesseract/wiki adresinden kurun.)",
+        ):
+            return False
+        path = filedialog.askopenfilename(
+            title="tesseract.exe dosyasını seçin",
+            filetypes=[("tesseract.exe", "tesseract.exe"), ("Tüm dosyalar", "*.*")],
+        )
+        if not path:
+            return False
+        sirala.pytesseract.pytesseract.tesseract_cmd = path
+        try:
+            sirala.pytesseract.get_tesseract_version()
+        except Exception:
+            messagebox.showerror("Geçersiz dosya", "Seçilen dosya çalışan bir Tesseract programı değil.")
+            return False
+        sirala.save_tesseract_cmd(path)
+        return True
+
     def _append_log(self, text: str):
         self.log_text.configure(state="normal")
         self.log_text.insert("end", text + "\n")
@@ -123,14 +151,15 @@ class App(tk.Tk):
         try:
             sirala.pytesseract.get_tesseract_version()
         except Exception:
-            messagebox.showerror(
-                "Tesseract bulunamadı",
-                "Tesseract OCR kurulu değil veya PATH'te değil.\n\n"
-                "Windows: https://github.com/UB-Mannheim/tesseract/wiki\n"
-                "macOS: brew install tesseract tesseract-lang\n"
-                "Linux: sudo apt install tesseract-ocr tesseract-ocr-deu",
-            )
-            return
+            if not self._prompt_manual_tesseract():
+                messagebox.showerror(
+                    "Tesseract bulunamadı",
+                    "Tesseract OCR kurulu değil veya PATH'te değil.\n\n"
+                    "Windows: https://github.com/UB-Mannheim/tesseract/wiki\n"
+                    "macOS: brew install tesseract tesseract-lang\n"
+                    "Linux: sudo apt install tesseract-ocr tesseract-ocr-deu",
+                )
+                return
 
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")

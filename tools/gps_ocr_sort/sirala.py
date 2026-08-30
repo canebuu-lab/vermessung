@@ -19,6 +19,7 @@ Ne yapar:
 
 import argparse
 import csv
+import os
 import re
 import shutil
 import sys
@@ -33,6 +34,54 @@ import piexif
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 UNPROCESSED_FOLDER = "Bulunamayanlar"
+
+# Kullanicinin elle sectigi tesseract.exe konumu burada saklanir, bir dahaki
+# acilista tekrar sormamak icin.
+CONFIG_PATH = Path.home() / ".sokak_gps_ayirici.json"
+
+
+def load_saved_tesseract_cmd() -> bool:
+    import json
+    try:
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        cmd = data.get("tesseract_cmd")
+        if cmd and Path(cmd).is_file():
+            pytesseract.pytesseract.tesseract_cmd = cmd
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def save_tesseract_cmd(cmd: str):
+    import json
+    try:
+        CONFIG_PATH.write_text(json.dumps({"tesseract_cmd": cmd}), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def configure_tesseract_path():
+    """Tesseract PATH'te degilse (kurulum sirasinda PATH'e eklenmediyse veya
+    program PATH guncellemesinden once acildiysa), once daha once kullanici
+    tarafindan elle secilmis bir konum var mi bakar, sonra bilinen standart
+    Windows kurulum klasorlerinde arar."""
+    if shutil.which("tesseract"):
+        return
+    if load_saved_tesseract_cmd():
+        return
+    candidates = []
+    for env_var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "LOCALAPPDATA"):
+        base = os.environ.get(env_var)
+        if base:
+            candidates.append(Path(base) / "Tesseract-OCR" / "tesseract.exe")
+    for candidate in candidates:
+        if candidate.is_file():
+            pytesseract.pytesseract.tesseract_cmd = str(candidate)
+            return
+
+
+configure_tesseract_path()
 
 # Tarih/saat satirini yakalar, orn. "20/06/2026 12:09 PM" (haftanin gunu farkli
 # dilde/alfabede basildigindan - orn. Kiril - onu yoksayip sadece tarih+saati alir).
