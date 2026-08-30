@@ -108,6 +108,46 @@ LATLONG_LOOSE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# OCR bazen ondalik noktayi tamamen atlayip "Lat 51357628" gibi tek bir rakam
+# dizisi birakiyor - genelde sadece Lat VEYA Long'dan biri icin (digeri normal
+# noktali kalabiliyor), bu yuzden her iki sayi da bagimsiz olarak noktali ya
+# da noktasiz olabilir. GPS Map Camera her zaman 6 haneli ondalik kisim
+# bastigindan (orn. 51.357628, 6.686316), noktasiz bir dizide son 6 haneyi
+# kesirli kisim, gerisini tam sayi kismi kabul edip yeniden ayiriyoruz.
+_NUM_PART = r"(-?\d{1,3}\.\d{3,8}|-?\d{7,9})"
+LATLONG_FLEX_RE = re.compile(
+    rf"Lat[^0-9\-]{{0,5}}{_NUM_PART}[^0-9\-]{{0,15}}Lo?ng[^0-9\-]{{0,5}}{_NUM_PART}",
+    re.IGNORECASE,
+)
+
+
+def _parse_flex_value(raw: str, limit: float):
+    if "." in raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return None
+        return value if -limit <= value <= limit else None
+    negative = raw.startswith("-")
+    digits = raw.lstrip("-")
+    if len(digits) <= 6:
+        return None
+    value = float(f"{digits[:-6]}.{digits[-6:]}")
+    if negative:
+        value = -value
+    return value if -limit <= value <= limit else None
+
+
+def find_latlong_flex(text: str):
+    match = LATLONG_FLEX_RE.search(text)
+    if not match:
+        return None
+    lat = _parse_flex_value(match.group(1), 90)
+    lon = _parse_flex_value(match.group(2), 180)
+    if lat is None or lon is None:
+        return None
+    return lat, lon, match
+
 # Kucuk kirpma (yakin/temiz) once denenir; adres uzunsa (satirlar sarilmissa)
 # daha buyuk kirpmaya gecilir. Ilk gecerli eslesmede durulur.
 CROP_FRACTIONS = (0.25, 0.32, 0.4, 0.5, 0.65, 0.8, 1.0)
@@ -280,11 +320,11 @@ def extract_info(image_path: Path, lang: str) -> ExtractResult:
     except Exception as exc:
         return ExtractResult(error=f"Goruntu acilamadi: {exc}")
 
-    def make_result(text: str, pattern) -> ExtractResult:
-        found = find_latlong(text, pattern)
+    def make_result(text: str, finder) -> ExtractResult:
+        found = finder(text)
         lat, lon, _ = found
         lines = [ln.strip() for ln in text.splitlines()]
-        lat_idx = next((i for i, ln in enumerate(lines) if find_latlong(ln, pattern)), None)
+        lat_idx = next((i for i, ln in enumerate(lines) if finder(ln)), None)
         street = extract_street_from_lines(lines, lat_idx) if lat_idx is not None else None
         result = ExtractResult(lat=lat, lon=lon, street=street, dt=extract_datetime(text), raw_text=text)
         if looks_like_street(result.street):
@@ -296,6 +336,9 @@ def extract_info(image_path: Path, lang: str) -> ExtractResult:
     # ancak en az iki bagimsiz kirpma/olcek denemesi ayni sonucu verdiginde
     # ("hemfikir" oldugunda) guvenilir sayilir; bu yuzden ilk basarili
     # okumada hemen durulmaz, teyit icin en az bir tane daha aranir.
+    def strict_finder(t):
+        return find_latlong(t, LATLONG_STRICT_RE)
+
     strict_matches: list = []
     for left_fraction in LEFT_FRACTIONS:
         for bottom_fraction in CROP_FRACTIONS:
@@ -307,8 +350,11 @@ def extract_info(image_path: Path, lang: str) -> ExtractResult:
                 text = ocr_image(source, lang)
             except Exception as exc:
                 return ExtractResult(error=f"OCR hatasi: {exc}")
-            if find_latlong(text, LATLONG_STRICT_RE):
-                strict_matches.append(make_result(text, LATLONG_STRICT_RE))
+            finder = strict_finder if strict_finder(text) else None
+            if finder is None and find_latlong_flex(text):
+                finder = find_latlong_flex
+            if finder is not None:
+                strict_matches.append(make_result(text, finder))
                 confirmed = find_confirmed_match(strict_matches)
                 if confirmed:
                     return confirmed
