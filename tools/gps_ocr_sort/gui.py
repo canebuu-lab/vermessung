@@ -5,10 +5,14 @@ sirala.py'deki OCR/EXIF/klasorleme mantigini kullanarak, kaynak ve hedef
 klasor secmenizi saglayan basit bir pencere sunar. Ekstra kurulum
 gerektirmez (Tkinter Python ile birlikte gelir); sadece requirements.txt
 ve Tesseract OCR kurulu olmali (bkz. README.md).
+
+Iki sekme var:
+    - "Otomatik Sıralama": OCR ile toplu isleme (asil program).
+    - "Elle GPS Ekle": OCR'in okuyamadigi (Bulunamayanlar) fotograflar icin
+      Lat/Long'u elle girip toplu disa aktarma.
 """
 
 import queue
-import sys
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -16,14 +20,12 @@ from tkinter import filedialog, messagebox, ttk
 
 import sirala
 
+MANUAL_EXPORT_FOLDER = "BulunamayanlarExport"
 
-class App(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("Sokak GPS Ayırıcı")
-        self.geometry("760x560")
-        self.minsize(620, 440)
 
+class AutoSortTab(ttk.Frame):
+    def __init__(self, master):
+        super().__init__(master)
         self.source_var = tk.StringVar()
         self.dest_var = tk.StringVar()
         self.move_var = tk.BooleanVar(value=False)
@@ -187,6 +189,165 @@ class App(tk.Tk):
         except Exception as exc:
             log(f"Beklenmeyen hata: {exc}")
             self.msg_queue.put(("done", str(exc)))
+
+
+class ManualGpsTab(ttk.Frame):
+    """OCR'in okuyamadigi fotograflar icin Lat/Long'u elle girip GPS yazma araci."""
+
+    def __init__(self, master):
+        super().__init__(master)
+        self.folder: Path | None = None
+        self.files: list[Path] = []
+        self.entries: dict[str, tuple[float, float]] = {}
+        self._build_widgets()
+
+    def _build_widgets(self):
+        top = ttk.Frame(self)
+        top.pack(fill="x", padx=10, pady=8)
+        ttk.Label(top, text="Bulunamayanlar klasörü:").pack(side="left")
+        self.folder_var = tk.StringVar()
+        ttk.Entry(top, textvariable=self.folder_var).pack(side="left", fill="x", expand=True, padx=6)
+        ttk.Button(top, text="Gözat…", command=self._pick_folder).pack(side="left")
+
+        mid = ttk.Frame(self)
+        mid.pack(fill="both", expand=True, padx=10, pady=6)
+
+        list_frame = ttk.Frame(mid)
+        list_frame.pack(side="left", fill="both", expand=True)
+        self.listbox = tk.Listbox(list_frame, exportselection=False)
+        self.listbox.pack(side="left", fill="both", expand=True)
+        self.listbox.bind("<<ListboxSelect>>", self._on_select)
+        list_scroll = ttk.Scrollbar(list_frame, command=self.listbox.yview)
+        self.listbox.configure(yscrollcommand=list_scroll.set)
+        list_scroll.pack(side="right", fill="y")
+
+        form = ttk.Frame(mid)
+        form.pack(side="left", fill="y", padx=(12, 0))
+        self.selected_label = ttk.Label(form, text="Seçili dosya: -", wraplength=220)
+        self.selected_label.pack(anchor="w", pady=(0, 10))
+        ttk.Label(form, text="Lat (Enlem):").pack(anchor="w")
+        self.lat_var = tk.StringVar()
+        ttk.Entry(form, textvariable=self.lat_var, width=22).pack(anchor="w")
+        ttk.Label(form, text="Long (Boylam):").pack(anchor="w", pady=(8, 0))
+        self.lon_var = tk.StringVar()
+        ttk.Entry(form, textvariable=self.lon_var, width=22).pack(anchor="w")
+        ttk.Button(form, text="Bu Fotoğrafı Kaydet", command=self._save_current).pack(anchor="w", pady=14)
+        ttk.Label(form, text="(✓ işaretli olanlar\nzaten girildi)", foreground="#666").pack(anchor="w")
+
+        bottom = ttk.Frame(self)
+        bottom.pack(fill="x", padx=10, pady=(0, 4))
+        self.export_btn = ttk.Button(
+            bottom, text=f"Tümünü Dışa Aktar ({MANUAL_EXPORT_FOLDER})", command=self._export_all
+        )
+        self.export_btn.pack(side="left")
+        self.status_label = ttk.Label(bottom, text="")
+        self.status_label.pack(side="left", padx=10)
+
+        self.log_text = tk.Text(self, height=8, state="disabled", wrap="word")
+        self.log_text.pack(fill="both", expand=False, padx=10, pady=(6, 10))
+
+    def _append_log(self, text: str):
+        self.log_text.configure(state="normal")
+        self.log_text.insert("end", text + "\n")
+        self.log_text.see("end")
+        self.log_text.configure(state="disabled")
+
+    def _pick_folder(self):
+        path = filedialog.askdirectory(title="Bulunamayanlar klasörünü seçin")
+        if not path:
+            return
+        self.folder_var.set(path)
+        self.folder = Path(path)
+        self.files = list(sirala.iter_image_files(self.folder))
+        self.entries.clear()
+        self._refresh_list()
+        self.lat_var.set("")
+        self.lon_var.set("")
+        self.selected_label.configure(text="Seçili dosya: -")
+
+    def _refresh_list(self):
+        self.listbox.delete(0, "end")
+        for path in self.files:
+            mark = "✓ " if path.name in self.entries else "   "
+            self.listbox.insert("end", f"{mark}{path.name}")
+
+    def _on_select(self, _event=None):
+        selection = self.listbox.curselection()
+        if not selection:
+            return
+        path = self.files[selection[0]]
+        self.selected_label.configure(text=f"Seçili dosya: {path.name}")
+        if path.name in self.entries:
+            lat, lon = self.entries[path.name]
+            self.lat_var.set(str(lat))
+            self.lon_var.set(str(lon))
+        else:
+            self.lat_var.set("")
+            self.lon_var.set("")
+
+    def _save_current(self):
+        selection = self.listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Fotoğraf seçilmedi", "Önce listeden bir fotoğraf seçin.")
+            return
+        path = self.files[selection[0]]
+        try:
+            lat = float(self.lat_var.get().strip().replace(",", "."))
+            lon = float(self.lon_var.get().strip().replace(",", "."))
+        except ValueError:
+            messagebox.showerror("Geçersiz değer", "Lat ve Long için geçerli bir sayı girin (örn. 51.357283).")
+            return
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            messagebox.showerror("Geçersiz değer", "Lat -90..90, Long -180..180 aralığında olmalı.")
+            return
+        self.entries[path.name] = (lat, lon)
+        self._refresh_list()
+        for i, p in enumerate(self.files):
+            if p == path:
+                self.listbox.selection_set(i)
+                break
+        self._append_log(f"Kaydedildi: {path.name} -> {lat}, {lon}")
+
+    def _export_all(self):
+        if not self.entries:
+            messagebox.showwarning("Boş liste", "Henüz hiçbir fotoğraf için Lat/Long girmediniz.")
+            return
+        if self.folder is None:
+            return
+        dest_dir = self.folder / MANUAL_EXPORT_FOLDER
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        ok, failed = 0, 0
+        for path in self.files:
+            if path.name not in self.entries:
+                continue
+            lat, lon = self.entries[path.name]
+            try:
+                dest_path = sirala.unique_dest(dest_dir / path.name)
+                sirala.save_with_gps(path, dest_path, lat, lon)
+                ok += 1
+                self._append_log(f"Dışa aktarıldı: {path.name}")
+            except Exception as exc:
+                failed += 1
+                self._append_log(f"HATA ({path.name}): {exc}")
+        self.status_label.configure(text=f"{ok} fotoğraf dışa aktarıldı" + (f", {failed} hata" if failed else ""))
+        messagebox.showinfo(
+            "Bitti",
+            f"{ok} fotoğraf GPS'lenip '{MANUAL_EXPORT_FOLDER}' klasörüne kaydedildi."
+            + (f"\n{failed} fotoğrafta hata oluştu." if failed else ""),
+        )
+
+
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Sokak GPS Ayırıcı")
+        self.geometry("820x600")
+        self.minsize(680, 480)
+
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill="both", expand=True)
+        notebook.add(AutoSortTab(notebook), text="Otomatik Sıralama")
+        notebook.add(ManualGpsTab(notebook), text="Elle GPS Ekle")
 
 
 def main():
