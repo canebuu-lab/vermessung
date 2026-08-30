@@ -33,3 +33,14 @@ jobs:
         with:
           name: SokakGPSAyirici-windows
           path: tools/gps_ocr_sort/dist/SokakGPSAyirici.exe
+
+      - name: Commit exe into repo
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p tools/gps_ocr_sort/dist_release
+          cp tools/gps_ocr_sort/dist/SokakGPSAyirici.exe tools/gps_ocr_sort/dist_release/SokakGPSAyirici.exe
+          git add tools/gps_ocr_sort/dist_release/SokakGPSAyirici.exe
+          git diff --cached --quiet && echo "no changes" || git commit -m "Add built Windows exe [skip ci]"
+          git push
