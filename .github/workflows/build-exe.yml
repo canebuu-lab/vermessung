@@ -1,0 +1,29 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r tools/gps_ocr_sort/requirements.txt pyinstaller
+
+      - name: Build exe
+        working-directory: tools/gps_ocr_sort
+        run: |
+          pyinstaller --onefile --windowed --name SokakGPSAyirici gui.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SokakGPSAyirici-windows
+          path: tools/gps_ocr_sort/dist/SokakGPSAyirici.exe
